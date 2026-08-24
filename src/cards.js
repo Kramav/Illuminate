@@ -169,6 +169,71 @@ export function finalize(doc, items) {
   }));
 }
 
+/**
+ * Find a question not already asked in this deck.
+ *
+ * The source slug is tried first because it is already a tag on the card — so the suffix names
+ * something the deck has told you anyway, rather than inventing a vocabulary. The counter after it
+ * is for the case the slug cannot settle: two files of the same name in different directories share
+ * a slug, so "(lecture3)" would collide a second time.
+ *
+ * The result may run past `MAX_FRONT`. That limit exists to reject prose masquerading as a term, and
+ * these fronts already passed it — dropping a card here to satisfy a length rule would lose material
+ * over a cosmetic concern.
+ */
+function freeFront(front, slug, taken) {
+  if (!taken.has(normalize(front))) return front;
+  const withSlug = `${front} (${slug})`;
+  if (!taken.has(normalize(withSlug))) return withSlug;
+  for (let n = 2; ; n++) {
+    const numbered = `${withSlug} ${n}`;
+    if (!taken.has(normalize(numbered))) return numbered;
+  }
+}
+
+/**
+ * Join several documents' cards into one deck every study app will accept.
+ *
+ * `dedupe` keeps one card per question inside a document; nothing did that *between* documents, and
+ * the formats we write are stricter than that gap. QuickMathPlus's `parseSet` throws on a repeated
+ * front and on a repeated id, which fails the whole import rather than the row — so two lectures
+ * that both define osmosis produced a file that imported nowhere.
+ *
+ * Both cards are kept, and the later question is disambiguated. Two rules make that safe to re-run:
+ *
+ *  - **The first occurrence is never touched.** Only the second and later get a suffix, so a file
+ *    produces the same card whether it is converted alone or alongside the rest of the course.
+ *  - **The id does not move with the question.** Ids are already `guid(slug, front)` and slugs
+ *    differ per file, so they are unique across a run without help; keeping the original means a
+ *    learner's progress survives adding another lecture to the command line. The exception is two
+ *    files that share a slug *and* a question, where the ids really are equal and one of them has to
+ *    change — those two cards were indistinguishable anyway.
+ *
+ * Pure, and separate from `extract`, so a GUI merging decks can call exactly this.
+ *
+ * @param {Array<{slug: string, cards: Array}>} decks
+ * @returns {{ cards: Array, renamed: number }}
+ */
+export function merge(decks) {
+  const fronts = new Set();
+  const ids = new Set();
+  const cards = [];
+  let renamed = 0;
+
+  for (const { slug, cards: deck } of decks) {
+    for (const card of deck) {
+      const front = freeFront(card.front, slug, fronts);
+      if (front !== card.front) renamed++;
+      const id = ids.has(card.id) ? guid(slug, front) : card.id;
+      fronts.add(normalize(front));
+      ids.add(id);
+      cards.push({ ...card, front, id });
+    }
+  }
+
+  return { cards, renamed };
+}
+
 /** Keep one card per question, preferring the fullest answer we saw for it. */
 function dedupe(cards) {
   const byFront = new Map();

@@ -1,0 +1,57 @@
+# The suite, on every push.
+#
+# QuickMathPlus is checked out beside this repo deliberately. The contract test in write.test.js —
+# our file, their parser — skips itself when that repository is absent, so on a bare runner the most
+# valuable assertion in the suite would pass by not running. Checking it out is what makes a format
+# regression fail here rather than in the middle of someone's revision.
+
+name: test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # package.json declares >=20; nothing had ever verified 20 specifically.
+        node: ['20', '22', '24']
+
+    steps:
+      - name: Check out illuminate
+        uses: actions/checkout@v4
+        with:
+          path: illuminate
+
+      - name: Check out QuickMathPlus beside it
+        uses: actions/checkout@v4
+        continue-on-error: true
+        with:
+          repository: ${{ github.repository_owner }}/QuickMathPlus
+          path: QuickMathPlus
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: illuminate/package-lock.json
+
+      - run: npm ci
+        working-directory: illuminate
+
+      - name: Confirm the contract test is actually running
+        working-directory: illuminate
+        run: |
+          if [ -f ../QuickMathPlus/www/src/cards.js ]; then
+            echo "QuickMathPlus present — the import contract will be asserted"
+          else
+            echo "::warning::QuickMathPlus not checked out; the import contract test will skip"
+          fi
+
+      - run: npm test
+        working-directory: illuminate

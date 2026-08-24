@@ -70,10 +70,13 @@ wtglzg   Osmosis (lecture4)      the movement of water across a membrane   lectu
 The suffix is the source slug, which is already a tag on the card — so it names something the deck
 already told you, rather than introducing a new vocabulary.
 
-**Where it goes.** A run-level pass in `illuminate.js` after the file loop, not inside `cards.js`:
-`extract` operates on one document by contract and should keep doing so. Report it on stderr
-(`2 questions appeared in more than one file — disambiguated`) so the overlap is visible rather than
-silent.
+**Where it goes.** Shipped as `merge(decks)` in [cards.js](src/cards.js), called from
+`illuminate.js` after the file loop — one step off the plan, which said to put the pass in
+`illuminate.js` itself. The reasoning that moved it is [illuminate.js](illuminate.js)'s own header:
+*"everything under src/ is pure, which is what will let a GUI call the same code later without any of
+it moving."* Merging two decks is exactly what a GUI would need, and a pass living in the CLI could
+not be reused. `extract`'s one-document contract is untouched either way, which was the actual
+concern. Reported on stderr so the overlap is visible rather than silent.
 
 **Tests.** Two files with an overlapping term → both cards present, first front untouched, ids
 unchanged from the single-file run, and the output survives `parseSet`. That last assertion is the
@@ -184,8 +187,25 @@ Recorded so these stay decisions rather than oversights:
 
 ## Done
 
-- One test, one bug: two files sharing a question import cleanly, with both cards intact.
-- `npm test` exercises the binary, not just the modules.
-- `--min abc`, a missing file, and a missing output directory each fail with a sentence you can act on.
-- CI runs the suite — QuickMathPlus contract test included — on every push.
-- A fresh clone can read a PDF by following the README.
+All five, and the suite went from 46 tests to 68.
+
+- [x] **Two files sharing a question import cleanly, with both cards intact.** `merge` in
+  [cards.js](src/cards.js). The deck that reported `IMPORT REJECTED: row 4 repeats the front
+  "Osmosis"` now imports as six cards, and the first file's ids are unchanged from converting it
+  alone.
+- [x] **`npm test` exercises the binary, not just the modules.** [test/cli.test.js](test/cli.test.js)
+  spawns the real command — 14 tests, including the multi-file case and a second QuickMathPlus
+  contract check on a file the CLI actually produced.
+- [x] **`--min abc`, a missing file, and a missing output directory each fail with a sentence you can
+  act on.** Plus `--version`, and `--min` validated before any file is read rather than after.
+- [x] **CI runs the suite on every push** — [test.yml](.github/workflows/test.yml), Node 20 / 22 / 24,
+  checking QuickMathPlus out beside the repo so the contract tests execute instead of skipping.
+- [x] **A fresh clone can read a PDF by following the README.** Install step added, along with the
+  multi-file behaviour and the npm-11 lockfile note.
+
+Two things worth knowing that only surfaced in the building:
+
+- **`--min -1` never reaches our guard.** `parseArgs` reads a bare leading dash as another option and
+  rejects it first, with its own message pointing at `--min=-1`. That form is what the test uses.
+- **`Number('')` is `0`**, so an empty `--min` would have read as "no minimum" — the same class of
+  quiet coercion as the `NaN` bug it was added to fix. The guard tests the string's shape instead.

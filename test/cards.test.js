@@ -9,7 +9,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { splitTermDef, splitBoldLead, accept, extract, guid } from '../src/cards.js';
+import { splitTermDef, splitBoldLead, accept, extract, guid, merge } from '../src/cards.js';
 import { buildDoc } from '../src/doc.js';
 
 const docOf = (lines, ref = 'slide-1') => buildDoc('lecture3.pptx', [{
@@ -130,4 +130,74 @@ test('what no rule could read is kept as residue rather than forced into a card'
   assert.equal(cards.length, 1);
   assert.equal(residue.length, 1);
   assert.match(residue[0].text, /which is why cells burst/);
+});
+
+/* -------------------------------------------------------------------------- */
+/* Merging several documents into one deck                                    */
+/* -------------------------------------------------------------------------- */
+
+/** Cards as `finalize` leaves them, which is what `merge` is handed. */
+const deckOf = (slug, fronts) => ({
+  slug,
+  cards: fronts.map((front) => ({ front, back: 'water movement', tags: [slug], id: guid(slug, front) })),
+});
+
+test('merge: a question asked in only one file is left exactly alone', () => {
+  const { cards, renamed } = merge([deckOf('lecture3', ['Osmosis']), deckOf('lecture4', ['Enzyme'])]);
+  assert.deepEqual(cards.map((c) => c.front), ['Osmosis', 'Enzyme']);
+  assert.equal(renamed, 0);
+});
+
+test('merge: a repeated question keeps both cards, naming the later one', () => {
+  const { cards, renamed } = merge([deckOf('lecture3', ['Osmosis']), deckOf('lecture4', ['Osmosis'])]);
+  assert.deepEqual(cards.map((c) => c.front), ['Osmosis', 'Osmosis (lecture4)']);
+  assert.equal(renamed, 1);
+});
+
+test('merge: the first occurrence never moves, so a re-run does not renumber a learner\'s deck', () => {
+  const alone = merge([deckOf('lecture3', ['Osmosis'])]).cards[0];
+  const batched = merge([deckOf('lecture3', ['Osmosis']), deckOf('lecture4', ['Osmosis'])]).cards[0];
+  assert.deepEqual(batched, alone);
+});
+
+test('merge: a renamed card keeps the id derived from its original question', () => {
+  const { cards } = merge([deckOf('lecture3', ['Osmosis']), deckOf('lecture4', ['Osmosis'])]);
+  // Adding a lecture to the command line must not hand this card someone else's progress.
+  assert.equal(cards[1].id, guid('lecture4', 'Osmosis'));
+});
+
+test('merge: fronts differing only in case or spacing still count as the same question', () => {
+  // `parseSet` compares raw text, but a deck asking "Osmosis" and "osmosis" is two cards for one
+  // fact — the drill would treat them as unrelated and the learner would answer both.
+  const { cards, renamed } = merge([deckOf('lecture3', ['Osmosis']), deckOf('lecture4', ['  osmosis'])]);
+  assert.equal(renamed, 1);
+  assert.equal(new Set(cards.map((c) => c.front)).size, 2);
+});
+
+test('merge: two files with the same name are separated, ids included', () => {
+  // week1/lecture3.pptx and week2/lecture3.pptx share a slug, so their cards arrive with the same
+  // front *and* the same guid(slug, front) — the one case where an id has to be re-derived, since
+  // parseSet rejects a repeated id as flatly as a repeated question.
+  const { cards, renamed } = merge([deckOf('lecture3', ['Osmosis']), deckOf('lecture3', ['Osmosis'])]);
+  assert.equal(renamed, 1);
+  assert.deepEqual(cards.map((c) => c.front), ['Osmosis', 'Osmosis (lecture3)']);
+  assert.equal(new Set(cards.map((c) => c.id)).size, 2, 'both cards kept the same id');
+});
+
+test('merge: a third file of the same name falls back to a counter', () => {
+  // "(lecture3)" is itself taken by then, so the slug alone can no longer settle it.
+  const { cards } = merge([
+    deckOf('lecture3', ['Osmosis']), deckOf('lecture3', ['Osmosis']), deckOf('lecture3', ['Osmosis']),
+  ]);
+  assert.deepEqual(cards.map((c) => c.front),
+    ['Osmosis', 'Osmosis (lecture3)', 'Osmosis (lecture3) 2']);
+  assert.equal(new Set(cards.map((c) => c.id)).size, 3);
+});
+
+test('merge: a question repeated across three files gets three distinct cards', () => {
+  const { cards } = merge([
+    deckOf('wk1', ['Osmosis']), deckOf('wk2', ['Osmosis']), deckOf('wk3', ['Osmosis']),
+  ]);
+  assert.deepEqual(cards.map((c) => c.front), ['Osmosis', 'Osmosis (wk2)', 'Osmosis (wk3)']);
+  assert.equal(new Set(cards.map((c) => c.id)).size, 3);
 });

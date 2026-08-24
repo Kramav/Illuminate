@@ -12,9 +12,11 @@ import { readPptx } from './src/pptx.js';
 import { readDocx } from './src/docx.js';
 import { readPdf } from './src/pdf.js';
 import { buildDoc, slugify } from './src/doc.js';
-import { extract, finalize } from './src/cards.js';
+import { extract, finalize, merge } from './src/cards.js';
 import { expand, check, withoutDuplicates, PROVIDERS } from './src/llm.js';
 import { render, FORMATS, EXTENSION } from './src/write.js';
+
+const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 const USAGE = `
 illuminate — turn slides, documents and PDFs into a study set
@@ -30,10 +32,29 @@ illuminate — turn slides, documents and PDFs into a study set
   --dry-run          print the cards instead of writing a file
   --residue          also print what no rule could turn into a card
   --check            report what is installed and running, then stop
-  --help
+  --help             --version
 `.trim();
 
 const READERS = { '.pptx': readPptx, '.docx': readDocx, '.pdf': readPdf };
+
+/**
+ * Say what went wrong in the same voice as the rest of the CLI.
+ *
+ * Node's own message is accurate and unhelpful — it names an errno and a resolved absolute path for
+ * something the user typed as a relative one. Every other guard here explains itself, and a typo in
+ * a filename is the most likely mistake of all.
+ */
+function friendly(err, path, verb) {
+  const say = (msg) => Object.assign(new Error(msg), { cause: err });
+  if (err.code === 'ENOENT') {
+    return verb === 'read'
+      ? say(`no such file: ${path}`)
+      : say(`cannot write to ${path} — the directory does not exist`);
+  }
+  if (err.code === 'EACCES' || err.code === 'EPERM') return say(`cannot ${verb} ${path} — permission denied`);
+  if (err.code === 'EISDIR') return say(`${path} is a directory, not a file`);
+  return err;
+}
 
 async function readFile(path) {
   const ext = extname(path).toLowerCase();
@@ -41,7 +62,13 @@ async function readFile(path) {
   if (!reader) {
     throw new Error(`cannot read ${ext || 'that'} files (known: ${Object.keys(READERS).join(', ')})`);
   }
-  return buildDoc(basename(path), await reader(readFileSync(path)));
+  let bytes;
+  try {
+    bytes = readFileSync(path);
+  } catch (err) {
+    throw friendly(err, path, 'read');
+  }
+  return buildDoc(basename(path), await reader(bytes));
 }
 
 async function report() {
@@ -66,9 +93,14 @@ async function main(argv) {
       residue: { type: 'boolean', default: false },
       check: { type: 'boolean', default: false },
       help: { type: 'boolean', default: false },
+      version: { type: 'boolean', default: false },
     },
   });
 
+  if (values.version) {
+    console.log(version);
+    return 0;
+  }
   if (values.check) {
     await report();
     return 0;
@@ -87,14 +119,26 @@ async function main(argv) {
     // Tags are separated by spaces in the file format, so one containing a space becomes two tags.
     throw new Error(`--tag cannot contain spaces (got "${values.tag}")`);
   }
+  // Checked here rather than where it is used, because `Number('abc')` is NaN and every comparison
+  // against NaN is false — an unvalidated --min does not fail, it silently stops guarding. Reading
+  // the files first would also mean waiting through the whole run to be told the flag was a typo.
+  //
+  // The shape of the string is tested rather than the number it coerces to, because the coercion
+  // has its own quiet answers: `Number('')` is 0, so an empty --min would read as "no minimum" —
+  // which is not what someone who typed the flag and left it blank meant.
+  if (!/^\d+$/.test(values.min)) {
+    throw new Error(`--min must be a whole number of cards (got "${values.min}")`);
+  }
+  const min = Number(values.min);
 
-  const cards = [];
+  const decks = [];
   const shown = [];
 
   for (const path of positionals) {
     const doc = await readFile(path);
     const { cards: found, residue } = extract(doc, { tag: values.tag });
-    cards.push(...found);
+    const deck = { slug: doc.slug, cards: [...found] };
+    decks.push(deck);
     shown.push(...residue.map((r) => ({ ...r, source: doc.source })));
     console.error(`${path}: ${found.length} cards from ${doc.sections.length} sections`);
 
@@ -105,13 +149,17 @@ async function main(argv) {
         refs: new Set(doc.sections.map((s) => s.ref)),
         onProgress: (msg) => console.error(`  ${msg}`),
       });
+      // Compared against every card in hand rather than this file's alone: a rule-made card wins
+      // over a model-made one wherever it came from, and a restatement caught here costs nothing,
+      // where the same card caught in `merge` would survive as a disambiguated near-duplicate.
+      const sofar = decks.flatMap((d) => d.cards);
       // Tagged `ai` so a deck can be filtered back to the cards a rule was confident about.
-      const extra = finalize(doc, withoutDuplicates(items, found).map((item) => ({
+      const extra = finalize(doc, withoutDuplicates(items, sofar).map((item) => ({
         front: item.front,
         back: item.back,
         tags: [doc.slug, item.ref, values.tag, 'ai'].filter(Boolean),
       })));
-      cards.push(...extra);
+      deck.cards.push(...extra);
       console.error(`  ${values.llm}: ${extra.length} more from the leftovers`);
     }
   }
@@ -122,7 +170,12 @@ async function main(argv) {
     }
   }
 
-  const min = Number(values.min);
+  const { cards, renamed } = merge(decks);
+  if (renamed) {
+    console.error(`${renamed} question${renamed === 1 ? '' : 's'} appeared in more than one file`
+      + ' — disambiguated so the deck imports');
+  }
+
   if (cards.length < min) {
     throw new Error(`only ${cards.length} cards — below --min ${min}, writing nothing`);
   }
@@ -136,7 +189,11 @@ async function main(argv) {
   }
 
   const out = values.out ?? source.replace(/\.[^.]+$/, '') + EXTENSION[values.format];
-  writeFileSync(out, text, 'utf8');
+  try {
+    writeFileSync(out, text, 'utf8');
+  } catch (err) {
+    throw friendly(err, out, 'write');
+  }
   console.error(`wrote ${cards.length} cards to ${out}`);
   return 0;
 }

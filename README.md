@@ -3,9 +3,14 @@
 Take slides, word docs, and pdfs and turn it into a simple study set. Paired with a future implementation of my other repository, QuickMathPlux
 
 ```sh
+npm install                                   # once — pdfjs, for reading PDFs
 node illuminate.js lecture3.pptx --tag bio101
 # → lecture3.txt, importable into Anki and QuickMathPlus unchanged
 ```
+
+Node 20 or newer. `npm install` pulls one dependency, and only PDFs need it — `.pptx` and `.docx`
+work without it, so a clone that skipped the step reads two formats of three and says so clearly on
+the third. `node illuminate.js --check` reports which.
 
 ## What it reads
 
@@ -34,6 +39,22 @@ else.
 
 Card ids are hashed from the question, so re-running after editing one slide disturbs one card
 instead of renumbering the deck and orphaning a learner's progress.
+
+## Several files at once
+
+```sh
+node illuminate.js week*.pptx --out bio101.txt   # one deck from the whole course
+```
+
+A course repeats itself — two lectures both define osmosis — and the formats we write do not allow
+that: QuickMathPlus's importer rejects a repeated question outright, failing the entire file rather
+than the row. So both cards are kept and the later question is named after its source
+(`Osmosis (lecture4)`).
+
+Two rules make that safe to re-run. The **first occurrence is never touched**, so a file produces
+the same card whether it is converted alone or alongside the rest of the term. And the **id does not
+move with the question** — ids already carry the source, so adding another lecture to the command
+line cannot hand a card someone else's progress.
 
 ## How it decides what's a card
 
@@ -75,12 +96,20 @@ with prose costs that passage and nothing else — the rule-made cards are alrea
 --tag <tag>       extra tag, no spaces  --min <n>     refuse to write a deck smaller than n
 --dry-run         print, don't write    --residue     show what no rule could read
 --check           report what's available and how to get what isn't
+--help            --version
 ```
 
 ## Working on it
 
 `npm test` — `node --test`, no framework. The suite writes real ZIP bytes and reads them back
-through the real reader, and the last test feeds our output through QuickMathPlus's actual
-`parseSet` when that repository is checked out beside this one (it skips itself when it isn't).
-That parser rejects rather than repairs, so a duplicate question or a stray `;` fails the whole
-import — which is what those tests are guarding.
+through the real reader, and `test/cli.test.js` spawns the actual binary, because the parts of a CLI
+that go wrong — argument parsing, the loop over several files, what gets written where — are not
+reachable by importing a function.
+
+Two tests feed our output through QuickMathPlus's actual `parseSet`, when that repository is checked
+out beside this one; both skip themselves when it isn't. That parser rejects rather than repairs, so
+a duplicate question or a stray `;` fails the whole import — which is what those tests are guarding.
+CI checks QuickMathPlus out so they run there even when they'd skip locally.
+
+Running `npm install` under npm 11 rewrites `package-lock.json` slightly — it drops `libc` fields an
+older npm wrote. That diff is the npm version, not a dependency change.
