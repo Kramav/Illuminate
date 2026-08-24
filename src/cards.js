@@ -152,6 +152,23 @@ export function accept(card) {
  */
 const safeBack = (s) => s.replace(/;/g, ',').trim();
 
+/**
+ * Turn accepted candidates into finished cards.
+ *
+ * Exported because the language-model pass produces candidates too, and they have to go through
+ * exactly this — the same gate, the same dedupe, the same id derivation. A model asked for
+ * flashcards will return a three-sentence answer or a question called "Summary" without hesitating,
+ * and there is no reason to hold a second, slightly different opinion about that over in llm.js.
+ */
+export function finalize(doc, items) {
+  return dedupe(items.filter(accept)).map((card) => ({
+    front: card.front,
+    back: safeBack(card.back),
+    tags: card.tags ?? [],
+    id: guid(doc.slug, card.front),
+  }));
+}
+
 /** Keep one card per question, preferring the fullest answer we saw for it. */
 function dedupe(cards) {
   const byFront = new Map();
@@ -204,12 +221,5 @@ export function extract(doc, { tag = '' } = {}) {
     }
   }
 
-  const cards = dedupe(found.filter(accept)).map((card) => ({
-    front: card.front,
-    back: safeBack(card.back),
-    tags: card.tags,
-    id: guid(doc.slug, card.front),
-  }));
-
-  return { cards, residue };
+  return { cards: finalize(doc, found), residue };
 }
