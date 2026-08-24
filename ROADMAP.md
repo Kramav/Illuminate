@@ -8,16 +8,19 @@ The target is a **solid, trustworthy tool**: a repo you clone and rely on. Not a
 feature expansion. Publishing, `CONTRIBUTING.md`, OCR and new input formats are all deliberately out
 of scope, listed at the bottom so the decision is on the record rather than forgotten.
 
-Two rounds, **eight items, all shipped**. The suite went 46 → 68 → 80.
+**Ten items shipped**, one open ([11](#11-on-the-claude-path-max_tokens-is-now-shared-with-thinking)).
+The suite went 46 → 68 → 80 → 85.
 
 - **Round one (1–5)** was the repo: a bug that silently broke the thing the project exists to do, no
   tests on the binary, no CI, a README a fresh clone couldn't follow.
 - **Round two (6–8)** was the reading — the shapes real lecture material actually arrives in, which
   round one never tested. Two of the three were silent: content dropped with no card, no residue and
   no warning.
+- **Round three (9–11)** is the model pass, the one part of the pipeline neither earlier round looked
+  at. 9 and 10 are shipped; 11 is open, because confirming it costs real API calls.
 
-Started at 46 tests passing, which is worth saying plainly: **a green suite is what both rounds of
-findings hid behind.**
+Started at 46 tests passing, which is worth saying plainly: **a green suite is what every round of
+findings has hidden behind.**
 
 ---
 
@@ -315,3 +318,156 @@ formats. One limit added while building tables: **a table nested inside a table'
 outer table's remaining rows, because the element walk is non-greedy. Word permits the nesting and a
 glossary does not use it, and the failure is missing rows rather than wrong ones. Noted as a
 `ponytail` in [xml.js](src/xml.js) and [docx.js](src/docx.js) beside the others.
+
+---
+
+# Round three — the model pass
+
+**9 and 10 shipped. [11](#11-on-the-claude-path-max_tokens-is-now-shared-with-thinking) is open.**
+
+Round one was the repo, round two was the reading. Neither looked at [llm.js](src/llm.js), and the
+gap shows in the same shape as before: the suite has nine tests naming the model pass, and **not one
+of them has ever seen a model reply that worked.** Every existing test asserts on a failure —
+unparseable text, a dead server, `provider: none`. The success path, the batching, and the reference
+check are executed for the first time by a real user, on their own lecture notes.
+
+That is the round-two lesson again. `--llm` is optional, so an empty deck from it reads as "the
+model found nothing" rather than as a bug, which is exactly the kind of silence rounds one and two
+kept turning up.
+
+## 9. A Word handout without headings becomes one 7,700-character prompt
+
+`chunk` in [llm.js:67](src/llm.js#L67) batches *between* passages and never splits *within* one:
+
+```js
+if (size + block.length > CHUNK && current.length) {   // ← `current.length` is the escape hatch
+  chunks.push(current); current = []; size = 0;
+}
+current.push(block);
+```
+
+When `current` is empty the guard short-circuits and the block is pushed whole, however large. So
+`CHUNK = 3500` is a floor on batching, not a ceiling on prompt size.
+
+That would be academic if a passage could not get big. It can, because
+[docx.js:116](src/docx.js#L116) opens a new section only at a heading — so **a `.docx` with no
+Heading styles is one section**, and its residue is the whole document. A lecture handout typed in
+Word without using the heading styles is not an exotic input; it is the default way people write
+one. Reproduced end to end through the real reader, 40 paragraphs of prose:
+
+```
+sections: 1 | cards: 0 | residue entries: 1
+residue chars: [ 7709 ]
+requests: 1 | prompt chars: [ 7717 ]     ← CHUNK is 3500
+```
+
+It scales linearly with the handout: 100 paragraphs is one ~19,000-character request. The size cap
+that matters is not ours — Ollama's default context is 4096 tokens, roughly 16,000 characters, and
+it does not refuse an over-long prompt. It drops what does not fit. **The tail of the document
+silently pushes the beginning of the passage, and eventually the `SYSTEM` prompt with its rules,
+out of the model's view** — so the failure is not a crash but cards that quietly stop obeying the
+instructions, on the longest documents, where the model pass is worth the most.
+
+**The fix:** split an over-long block on paragraph boundaries before batching, so `CHUNK` bounds
+every prompt rather than most of them. The split is on `\n` between leftover lines, which is where
+`extract` joined them ([cards.js:311](src/cards.js#L311)) — no new notion of a boundary is needed.
+The `[ref]` label has to be repeated on each piece, or every card from the tail loses its section.
+
+## 10. The success path of `--llm` has never been executed by a test
+
+[llm.test.js](test/llm.test.js) is nine tests. Six are `parseCards` on strings, one is
+`withoutDuplicates`, one is `provider: none` (which returns before doing anything), one is a dead
+server. `expand` has never returned a card in a test.
+
+Everything between the reply and the deck is therefore unverified: the ref check that stops a model
+tagging a card onto a slide it never read, the `text.length < 60` skip, the batching in #9, the
+retry, and the `onProgress` reporting. `chunk` is not even exported.
+
+None of this needs a model. `expand` reaches the local providers through global `fetch`, so a stub
+covers all of it — that is how #9 above was reproduced:
+
+```js
+globalThis.fetch = async (url, opts) => ({
+  ok: true,
+  json: async () => ({ choices: [{ message: { content: '{"cards":[...]}' } }] }),
+});
+```
+
+Worth asserting: a good reply becomes a card; **an invented `ref` is dropped** (verified by hand —
+it is, but nothing holds it there); a passage under 60 characters costs no request; twelve passages
+become four batched requests, not twelve; a first reply that is prose triggers exactly one retry;
+and the case in #9, which is the assertion that would have caught it.
+
+## 11. On the Claude path, `max_tokens` is now shared with thinking
+
+[llm.js:137](src/llm.js#L137) asks for `max_tokens: 8000` with `model: 'claude-opus-5'` and no
+`thinking` field. On Opus 5 that no longer means "8000 tokens of JSON": **thinking is on by default
+when the parameter is omitted** — a change from Opus 4.8, where omitting it meant no thinking — and
+`max_tokens` caps thinking *plus* the response together.
+
+The failure this produces is bad in a specific way. A truncated reply is invalid JSON, so
+`parseCards` returns `null`, which [llm.js:185](src/llm.js#L185) cannot distinguish from a model
+that rambled — so it spends a **second** full request on the identical prompt, which truncates in
+the same place, and the passage is dropped with `did not come back as JSON`. Two requests billed,
+no cards, and a message that names the wrong cause.
+
+Unlike 9 and 10 this one is reasoned from Anthropic's current API documentation, not reproduced —
+checking it costs real API calls, so it is worth confirming before changing anything.
+
+**The fix is two lines.** Raise `max_tokens` so thinking has its own room, and read
+`stop_reason === 'max_tokens'` where `refusal` is already read one line above
+([llm.js:146](src/llm.js#L146)) — a truncated reply should say so and skip the retry, since
+re-sending an identical prompt cannot fix a length cap. `effort: 'low'` is already right and should
+stay; disabling thinking outright is the wrong lever here, because on Opus 5 that risks `<thinking>`
+tags leaking into the visible text, which is precisely what `parseCards` then has to survive.
+
+## Order
+
+**10 first**, which reverses round one's ordering and for a reason. There the bug came first because
+it produced a wrong deck; here 9 and 11 both fail *quietly and expensively*, and neither can be
+demonstrated — or shown fixed — without the stub harness. Then **9**, the one with a reproduction
+and a realistic input behind it. **11** last, since it wants confirmation against the live API
+before the code moves.
+
+Held to, and the ordering paid for itself: the split assertion was written against the old `chunk`
+and failed there before `blocksFor` existed, which is the only reason it is a guard rather than a
+description.
+
+## Done (9 and 10)
+
+- [x] **A section too long for one request is split instead of sent whole.** `blocksFor` in
+  [llm.js](src/llm.js), cutting on the newline `extract` joined the leftover lines with and
+  repeating the `[ref]` label on each piece. The 40-paragraph heading-less handout that produced one
+  7,717-character prompt now produces three, of 3,471 / 3,481 / 779 — `CHUNK` is a ceiling now, not
+  only a floor.
+- [x] **The model pass has tests that watch it succeed, not only fail.** Five in
+  [llm.test.js](test/llm.test.js), against a stubbed `fetch` — no model, no server, no network.
+  A reply becomes a card; **an invented `ref` is dropped**; a passage under 60 characters costs no
+  request; twelve passages become fewer than twelve prompts; a prose reply costs exactly one retry
+  and the retry lands.
+
+**85 tests**, up from 80. README updated: the batching is now described where the model pass is,
+since `--llm` progress lines count requests rather than sections and a long handout will report more
+of them than it used to.
+
+Two things worth knowing that only surfaced in the building:
+
+- **A single line longer than `CHUNK` is still sent whole.** There is no boundary inside one line
+  worth trusting, and it is a far smaller object than the document it used to drag along with it.
+  Marked as a `ponytail` on `blocksFor` rather than left implicit.
+- **The label eats into the budget**, so `room` is `CHUNK` minus the label, not `CHUNK`. A section
+  with a long title would otherwise push each of its own pieces slightly over the size the split
+  exists to enforce.
+
+## Still not doing
+
+Unchanged. Two things looked at in this round and deliberately left alone:
+
+- **Splitting a section that has no headings into pseudo-sections.** It would shrink the passages in
+  #9, but it invents structure the document does not have, and every card's `ref` tag would then
+  point at a section number the reader cannot find in their own file. Bounding the prompt is the
+  honest fix; re-cutting the document is not.
+- **A token counter for prompt sizing.** `CHUNK` is characters, which is a rough proxy for tokens
+  and always will be. A real count means a tokenizer per provider, and the thing it would buy —
+  packing prompts closer to the true limit — is not worth a dependency when the current problem is
+  prompts that exceed it by 5×.

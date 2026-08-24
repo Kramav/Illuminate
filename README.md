@@ -98,6 +98,11 @@ Model-made cards go through the same acceptance gate as rule-made ones and are t
 can be filtered back to what a rule was confident about. A provider that is down, slow, or answering
 with prose costs that passage and nothing else — the rule-made cards are already in hand.
 
+Residue is batched into request-sized passages, and a section too long for one request is split
+across several — so a Word file written without heading styles, which is one section holding the
+whole document, does not become a single prompt past what a local model can actually read. The
+progress lines count those requests, not your sections.
+
 ## Options
 
 ```
