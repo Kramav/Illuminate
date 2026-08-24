@@ -1,0 +1,17 @@
+{
+  "name": "illuminate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Turn slides, docs, and PDFs into study sets",
+  "type": "module",
+  "bin": {
+    "illuminate": "./illuminate.js"
+  },
+  "scripts": {
+    "test": "node --test",
+    "start": "node illuminate.js"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
