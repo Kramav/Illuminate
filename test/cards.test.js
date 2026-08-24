@@ -201,3 +201,60 @@ test('merge: a question repeated across three files gets three distinct cards', 
   assert.deepEqual(cards.map((c) => c.front), ['Osmosis', 'Osmosis (wk2)', 'Osmosis (wk3)']);
   assert.equal(new Set(cards.map((c) => c.id)).size, 3);
 });
+
+/* -------------------------------------------------------------------------- */
+/* The tab path answers to the same guards as the rest                        */
+/* -------------------------------------------------------------------------- */
+
+test('a label is refused whether a dash or a tab introduces it', () => {
+  // These used to disagree: the tab branch returned before the label list was ever consulted, so
+  // the same left-hand side was a refusal with a dash and a card with a tab.
+  for (const label of ['Note', 'Step 2', 'Fig. 3', 'Q3', 'Due', 'Chapter 4', 'See']) {
+    assert.equal(splitTermDef(`${label} — see chapter 4`), null, `"${label} — ..." became a card`);
+    assert.equal(splitTermDef(`${label}\tsee chapter 4`), null, `"${label}<tab>..." became a card`);
+  }
+});
+
+test('a real term still reads through a tab', () => {
+  assert.deepEqual(splitTermDef('Osmosis\tthe movement of water across a membrane'),
+    { front: 'Osmosis', back: 'the movement of water across a membrane' });
+});
+
+test('a tab still exempts a front too long for the punctuation rule', () => {
+  // The word count guards against a sentence with a dash in the middle. A tab states the boundary
+  // outright, so there is no sentence to mistake — that exemption is the tab's whole privilege.
+  const wordy = 'The second law of thermodynamics in a closed system';
+  assert.equal(splitTermDef(`${wordy} — entropy never decreases`), null);
+  assert.deepEqual(splitTermDef(`${wordy}\tentropy never decreases`),
+    { front: wordy, back: 'entropy never decreases' });
+});
+
+test('a third column is answer material, not another boundary', () => {
+  // Left in place, the extra tab would reach the file as a column of its own and shift every field
+  // after it — which is what the writer quotes against, and better not to produce at all.
+  const split = splitTermDef('Osmosis\twater movement\tsee fig. 2');
+  assert.equal(split.back, 'water movement see fig. 2');
+  assert.ok(!split.back.includes('\t'));
+});
+
+test('a glossary table\'s header row is not a card', () => {
+  // "Term → Definition" is true of every glossary ever written and worth recalling from none.
+  for (const header of ['Term', 'Word', 'Concept', 'Definition']) {
+    assert.equal(splitTermDef(`${header}\tMeaning`), null, `"${header}" became a card`);
+  }
+});
+
+test('a two-column handout of labels yields its terms and nothing else', () => {
+  const { cards, residue } = extract(docOf([
+    'Osmosis\tthe movement of water across a membrane',
+    'Note\tsee chapter 4 before the lab',
+    'Step 2\tadd the reagent slowly',
+    'Due\tFriday, before the seminar',
+    'Diffusion\tmovement from high to low concentration',
+  ]));
+
+  assert.deepEqual(cards.map((c) => c.front).sort(), ['Diffusion', 'Osmosis']);
+  // Refused rows are set aside rather than dropped, so `--residue` shows them and the model pass
+  // still gets its look at them.
+  assert.match(residue[0].text, /Note\tsee chapter 4/);
+});

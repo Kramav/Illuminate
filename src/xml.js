@@ -35,3 +35,20 @@ export function elements(xml, tag) {
   while ((m = re.exec(xml)) !== null) out.push(m[1]);
   return out;
 }
+
+/**
+ * Every table row, as an array of cell inner-XML.
+ *
+ * The third thing both parsers need, and it is one function rather than two because the two formats
+ * differ here only in their prefix: DrawingML nests `a:tbl / a:tr / a:tc` and WordprocessingML nests
+ * `w:tbl / w:tr / w:tc`, with the same shape underneath. What a cell *contains* still differs — Word
+ * has tabs of its own, PowerPoint has none — so this returns the raw inner XML and lets each parser
+ * read it the way it already reads a paragraph.
+ *
+ * ponytail: a table inside a table's cell. `elements` is non-greedy, so the inner table's closing
+ * tag ends the outer one and the remaining outer rows are lost. Word permits it and lecture
+ * glossaries do not use it; the failure is missing rows rather than wrong ones.
+ */
+export function tableRows(xml, { table, row, cell }) {
+  return elements(xml, table).flatMap((tbl) => elements(tbl, row).map((tr) => elements(tr, cell)));
+}

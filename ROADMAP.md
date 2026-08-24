@@ -1,15 +1,23 @@
 # What's left
 
 Illuminate reads all three formats, applies the rules, runs the optional model pass, and writes
-files that import. The suite is 46 tests and they pass. What remains is not new capability — it is
-the gap between "works on my deck" and "I trust this with a semester of lectures."
+files that import. What remained was not new capability — it was the gap between "works on my deck"
+and "I trust this with a semester of lectures."
 
 The target is a **solid, trustworthy tool**: a repo you clone and rely on. Not an npm package, not a
 feature expansion. Publishing, `CONTRIBUTING.md`, OCR and new input formats are all deliberately out
 of scope, listed at the bottom so the decision is on the record rather than forgotten.
 
-Five items, in the order they should be done. The first is a real bug that silently breaks the
-thing the project exists to do.
+Two rounds, **eight items, all shipped**. The suite went 46 → 68 → 80.
+
+- **Round one (1–5)** was the repo: a bug that silently broke the thing the project exists to do, no
+  tests on the binary, no CI, a README a fresh clone couldn't follow.
+- **Round two (6–8)** was the reading — the shapes real lecture material actually arrives in, which
+  round one never tested. Two of the three were silent: content dropped with no card, no residue and
+  no warning.
+
+Started at 46 tests passing, which is worth saying plainly: **a green suite is what both rounds of
+findings hid behind.**
 
 ---
 
@@ -205,7 +213,105 @@ All five, and the suite went from 46 tests to 68.
 
 Two things worth knowing that only surfaced in the building:
 
+*(A second round followed — three more findings, below.)*
+
 - **`--min -1` never reaches our guard.** `parseArgs` reads a bare leading dash as another option and
   rejects it first, with its own message pointing at `--min=-1`. That form is what the test uses.
 - **`Number('')` is `0`**, so an empty `--min` would have read as "no minimum" — the same class of
   quiet coercion as the `NaN` bug it was added to fix. The guard tests the string's shape instead.
+
+---
+
+# Round two — what the first pass didn't look at
+
+The five items above were about the repo: its bug, its tests, its CI, its docs. They left the
+*reading* untested against the shapes real lecture material comes in. Three findings, all in the core
+path, all shipped.
+
+## 6. PowerPoint tables were dropped without a trace
+
+`shapesOf` splits a slide on `<p:sp>`, and a table is not one — it hangs off a `<p:graphicFrame>`.
+So a slide whose content was a term table produced **nothing**:
+
+```
+=== pptx TABLE ===
+lines: []
+cards: []
+```
+
+The worst of the three, because it was invisible. No card, no residue, no warning — and nothing for
+`--llm` to read either, since the model only ever sees residue. A deck built on tables converted to
+an empty file with nothing to explain why.
+
+**Fixed** in [pptx.js](src/pptx.js): each `<a:tr>` becomes one line, cells joined by tabs.
+
+## 7. The tab path skipped the label guard
+
+`splitTermDef` short-circuited on a tab and returned before the `NOT_A_TERM` list was ever consulted.
+Its comment claimed the sanity checks still applied "by `accept`" — but `accept` checks lengths and
+`BOILERPLATE`, never `NOT_A_TERM`. So the list [cards.js](src/cards.js) calls *"the difference
+between the rule working and the rule being useless"* did not run on the tab path at all:
+
+```
+"Note — see chapter 4"  -> null                              ← refused, correctly
+"Note\tsee chapter 4"   -> {front:"Note", back:"see chapter 4"}
+```
+
+And the tab path is exactly what the PDF column-gutter rule feeds. On a realistic two-column handout
+that was **four garbage cards out of six**, with zero residue — the precise failure the file's own
+header argues against.
+
+**Fixed** by splitting the two questions apart. `looksLikeTerm` asks whether the left side names
+anything and runs on both paths; the word count, which is only about *where* the split falls, stays
+the tab's exemption — a tab states the boundary a dash merely implies. Same handout now:
+
+```
+cards produced: 2 (2 are real terms)   ← was 6
+residue passages: 1                    ← was 0; --llm can still reach the rest
+```
+
+## 8. Word table glossaries produced no cards
+
+The ordinary way to write a glossary in Word is a two-column table. `paragraphsOf` picked up the
+`w:p` inside each cell but lost the cell wall, so term and definition arrived as unrelated lines that
+paired with nothing.
+
+**Fixed** in [docx.js](src/docx.js), the same way as 6 — with one wrinkle worth its own test:
+`paragraphsOf` walks *every* `<w:p>` in the file, cells included, so emitting rows as well would have
+put every glossary entry into the deck twice, once paired and once in pieces. `blocksOf` substitutes
+rows for the paragraphs inside them rather than adding to them.
+
+## What tied them together
+
+One rule, three formats: **a table row is a line whose cells are separated by tabs** — the same
+device [pdf.js](src/pdf.js) already used for a column gutter. The shared walk is `tableRows` in
+[xml.js](src/xml.js), which is one function rather than two because DrawingML and WordprocessingML
+differ here only in their prefix (`a:tbl/a:tr/a:tc` against `w:tbl/w:tr/w:tc`).
+
+Order mattered: 7 had to be fixed **before** 6 and 8, because tables funnel far more content into the
+tab path. Fixing them first would have multiplied the garbage-card leak instead of fixing it.
+
+The header row a glossary table starts with — "Term | Definition" — reads as a card that is true of
+every glossary ever written and worth recalling from none, so `term`, `word`, `concept`, `meaning`,
+`description` and `explanation` joined the label list. That covers headers wherever they arrive from,
+including a two-column PDF, rather than needing a rule per reader.
+
+## Done
+
+- [x] **A slide's table becomes cards instead of vanishing.**
+- [x] **A label is refused whether a dash or a tab introduces it** — and a real term still reads
+  through a tab, including one too long for the punctuation rule.
+- [x] **A Word glossary table becomes cards**, and its entries are not also counted singly.
+- [x] **A third column is answer material, not another boundary** — extra tabs would otherwise reach
+  the file as columns of their own.
+
+**80 tests**, up from 68. README updated on both: tables under *What it reads*, and the tab's exact
+privilege under *How it decides what's a card*.
+
+## Still not doing
+
+Unchanged from above — npm publishing, contributor docs, OCR, PDF bold detection, zip64, new input
+formats. One limit added while building tables: **a table nested inside a table's cell** loses the
+outer table's remaining rows, because the element walk is non-greedy. Word permits the nesting and a
+glossary does not use it, and the failure is missing rows rather than wrong ones. Noted as a
+`ponytail` in [xml.js](src/xml.js) and [docx.js](src/docx.js) beside the others.

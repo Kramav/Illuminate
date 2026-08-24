@@ -11,9 +11,18 @@
  */
 
 import { openZip } from './zip.js';
-import { decode, elements } from './xml.js';
+import { decode, elements, tableRows } from './xml.js';
 
 const HEADING = /^(?:Heading[1-9]|Title|Subtitle)$/i;
+
+/**
+ * A table block, matched whole so its paragraphs can be pulled out of the ordinary walk.
+ *
+ * ponytail: non-greedy, so a table nested in a cell ends this match at the inner table's closing
+ * tag, and the outer table's remaining rows fall through as loose paragraphs — the behaviour before
+ * any of this existed. Word allows the nesting; a glossary does not use it.
+ */
+const TABLE = /<w:tbl(?:\s[^>]*)?>[\s\S]*?<\/w:tbl>/g;
 
 /** Run content in document order: text elements and tabs, interleaved as they appear. */
 function runText(run) {
@@ -44,6 +53,48 @@ function paragraphsOf(xml) {
 }
 
 /**
+ * A table's rows, one line each, cells joined by a tab.
+ *
+ * The two-column table is how a Word glossary is actually written — far more often than the typed
+ * tab this file already honoured. Before this, the cell walls were invisible: every cell's paragraph
+ * arrived as its own line, so "Osmosis" and its definition were two unrelated lines and the pair
+ * produced no card at all.
+ *
+ * Joining a row with a tab hands it to the rule that already reads a tab as a deliberate column
+ * break, which is the same move the PDF reader makes with a gutter. One rule, three formats.
+ */
+function tableLines(xml) {
+  return tableRows(xml, { table: 'w:tbl', row: 'w:tr', cell: 'w:tc' })
+    // A tab typed *inside* a cell is not a column break — the cell wall is. Left alone it would
+    // split the row a second time, in a place the author did not mean as a boundary.
+    .map((cells) => cells.map((cell) => paragraphsOf(cell)
+      .map((p) => p.text).join(' ').replace(/\t+/g, ' ').trim()))
+    .filter((cells) => cells.some(Boolean))
+    .map((cells) => {
+      const text = cells.join('\t');
+      return { style: '', level: 0, text, runs: [{ text, bold: false }] };
+    });
+}
+
+/**
+ * The document in order, with table rows standing in for the paragraphs inside them.
+ *
+ * The substitution is the point rather than a detail: `paragraphsOf` walks every `<w:p>` in the
+ * file, and the ones inside cells are no exception — so emitting rows *as well* would put every
+ * glossary entry into the deck twice, once paired and once in pieces.
+ */
+function blocksOf(xml) {
+  const out = [];
+  let at = 0;
+  for (const match of xml.matchAll(TABLE)) {
+    out.push(...paragraphsOf(xml.slice(at, match.index)), ...tableLines(match[0]));
+    at = match.index + match[0].length;
+  }
+  out.push(...paragraphsOf(xml.slice(at)));
+  return out;
+}
+
+/**
  * Read a document into sections, split at headings.
  *
  * @param {Buffer} buf
@@ -52,7 +103,7 @@ function paragraphsOf(xml) {
 export function readDocx(buf) {
   const zip = openZip(buf);
   if (!zip.has('word/document.xml')) throw new Error('no document body found — is this really a .docx?');
-  const paragraphs = paragraphsOf(zip.read('word/document.xml').toString('utf8'));
+  const paragraphs = blocksOf(zip.read('word/document.xml').toString('utf8'));
 
   const sections = [];
   const open = (title) => {

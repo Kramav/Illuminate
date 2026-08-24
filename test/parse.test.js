@@ -120,3 +120,94 @@ test('doc: bullet glyphs and page numbers go away', () => {
   assert.equal(doc.sections[0].lines.length, 1);
   assert.equal(doc.sections[0].lines[0].runs[0].text, 'Osmosis');
 });
+
+/* -------------------------------------------------------------------------- */
+/* Tables                                                                     */
+/* -------------------------------------------------------------------------- */
+
+/** A DrawingML table cell, and a row of them. */
+const acell = (text) => `<a:tc><a:txBody>${para([[text, false]])}</a:txBody></a:tc>`;
+const atable = (rows) => `<a:tbl>${rows.map((cells) => `<a:tr>${cells.map(acell).join('')}</a:tr>`).join('')}</a:tbl>`;
+
+/** A slide holding a table, which hangs off a graphicFrame rather than a shape. */
+const tableSlide = (title, rows) => `<?xml version="1.0"?>
+<p:sld xmlns:p="p" xmlns:a="a"><p:cSld><p:spTree>
+  <p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr>
+    <p:txBody>${para([[title, false]])}</p:txBody></p:sp>
+  <p:graphicFrame><a:graphic><a:graphicData>${atable(rows)}</a:graphicData></a:graphic></p:graphicFrame>
+</p:spTree></p:cSld></p:sld>`;
+
+test('pptx: a table becomes rows, not nothing at all', () => {
+  // A table is not a `<p:sp>`, so the shape walk never saw one — a slide whose content was a term
+  // table produced no lines, no residue, and nothing for the model pass to read either.
+  const [slide] = readPptx(makeZip({
+    'ppt/slides/slide1.xml': tableSlide('Terms', [
+      ['Osmosis', 'the movement of water across a membrane'],
+      ['Diffusion', 'movement from high to low concentration'],
+    ]),
+  }));
+
+  assert.equal(slide.lines.length, 2, 'the table was dropped');
+  assert.equal(slide.lines[0].text ?? slide.lines[0].runs[0].text,
+    'Osmosis\tthe movement of water across a membrane');
+});
+
+test('pptx: a table and the slide body both survive together', () => {
+  const xml = tableSlide('Terms', [['Osmosis', 'water movement']])
+    .replace('<p:graphicFrame>', `<p:sp><p:nvSpPr><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr>
+      <p:txBody>${para([['Covered in the lab', false]])}</p:txBody></p:sp><p:graphicFrame>`);
+  const [slide] = readPptx(makeZip({ 'ppt/slides/slide1.xml': xml }));
+
+  const texts = slide.lines.map((l) => l.runs.map((r) => r.text).join(''));
+  assert.ok(texts.includes('Covered in the lab'), 'the body shape was lost to the table');
+  assert.ok(texts.some((t) => t.startsWith('Osmosis\t')), 'the table was lost to the body shape');
+});
+
+/** A Word table cell, and a row of them. */
+const wcell = (text) => `<w:tc><w:tcPr/>${wpara([[text, false]])}</w:tc>`;
+const wtable = (rows) => `<w:tbl><w:tblPr/>${
+  rows.map((cells) => `<w:tr>${cells.map(wcell).join('')}</w:tr>`).join('')}</w:tbl>`;
+
+test('docx: a two-column table is a glossary, not four loose lines', () => {
+  // The ordinary way to write a glossary in Word. The cell walls used to vanish, leaving term and
+  // definition as unrelated lines that paired with nothing.
+  const [section] = readDocx(makeZip({
+    'word/document.xml': documentXml([
+      wpara([['Glossary', false]], 'Heading1'),
+      wtable([['Osmosis', 'the movement of water across a membrane']]),
+    ]),
+  }));
+
+  assert.equal(section.title, 'Glossary');
+  assert.equal(section.lines.length, 1);
+  assert.equal(section.lines[0].text, 'Osmosis\tthe movement of water across a membrane');
+});
+
+test('docx: a table\'s paragraphs are not also counted on their own', () => {
+  // `paragraphsOf` walks every <w:p> in the file, cells included — so emitting rows *as well* would
+  // put every entry into the deck twice, once paired and once in pieces.
+  const [section] = readDocx(makeZip({
+    'word/document.xml': documentXml([wtable([['Osmosis', 'water movement']])]),
+  }));
+  assert.equal(section.lines.length, 1, `double-counted: ${JSON.stringify(section.lines.map((l) => l.text))}`);
+});
+
+test('docx: text before, inside and after a table keeps its order', () => {
+  const [section] = readDocx(makeZip({
+    'word/document.xml': documentXml([
+      wpara([['Before the table', false]]),
+      wtable([['Osmosis', 'water movement']]),
+      wpara([['After the table', false]]),
+    ]),
+  }));
+  assert.deepEqual(section.lines.map((l) => l.text),
+    ['Before the table', 'Osmosis\twater movement', 'After the table']);
+});
+
+test('docx: a tab typed inside a cell is not a second column break', () => {
+  const [section] = readDocx(makeZip({
+    'word/document.xml': documentXml([wtable([['Osmosis', 'water\tmovement']])]),
+  }));
+  // The cell wall is the boundary; a tab within a cell is the author's spacing, not their structure.
+  assert.equal(section.lines[0].text, 'Osmosis\twater movement');
+});

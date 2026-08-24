@@ -12,7 +12,7 @@
  */
 
 import { openZip } from './zip.js';
-import { decode, elements } from './xml.js';
+import { decode, elements, tableRows } from './xml.js';
 
 const SLIDE_PATH = /^ppt\/slides\/slide(\d+)\.xml$/;
 
@@ -53,6 +53,29 @@ function linesOf(xml) {
     if (runs.length) out.push({ text: runs.map((r) => r.text).join(''), runs, level });
   }
   return out;
+}
+
+/**
+ * A slide's tables, one line per row, cells joined by tabs.
+ *
+ * Tables were invisible before this: `shapesOf` splits on `<p:sp>`, and a table is not one — it
+ * hangs off a `<p:graphicFrame>` instead. So a slide whose content was a term table produced no
+ * lines at all, which is worse than producing bad ones. There was no card, no residue, and nothing
+ * for the model pass to read either, so a deck built on tables converted to an empty file with
+ * nothing to say why.
+ *
+ * The tab is the same device the PDF reader uses for a column gutter, and for the same reason: a
+ * table row *is* a term and its definition side by side, and `splitTermDef` already knows how to
+ * read that. Nothing new is needed downstream.
+ */
+function tableLines(xml) {
+  return tableRows(xml, { table: 'a:tbl', row: 'a:tr', cell: 'a:tc' })
+    .map((cells) => cells.map((cell) => linesOf(cell).map((l) => l.text).join(' ').trim()))
+    .filter((cells) => cells.some(Boolean))
+    // One run, unbolded, exactly as the PDF reader emits a tab-joined line: the tab is the signal
+    // here, and a per-cell bold flag would only give `splitBoldLead` a second opinion about a split
+    // the tab has already settled.
+    .map((cells) => ({ text: cells.join('\t'), runs: [{ text: cells.join('\t'), bold: false }], level: 0 }));
 }
 
 /** Where slideN's notes live, per its relationship file. */
@@ -100,7 +123,11 @@ export function readPptx(buf) {
     return {
       title: titleShape ? linesOf(titleShape).map((l) => l.text).join(' ').trim() : '',
       ref: `slide-${i + 1}`,
-      lines: body.flatMap(linesOf),
+      // Tables come after the shapes rather than in their position on the slide: they live outside
+      // the `<p:sp>` sequence entirely, so there is no shared order to interleave them into without
+      // walking the tree. Within a section the order only affects which line answers a question
+      // line, and a table row carries its own answer.
+      lines: [...body.flatMap(linesOf), ...tableLines(xml)],
       notes: notesText(zip, notesPathFor(zip, name)),
     };
   });

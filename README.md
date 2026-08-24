@@ -30,6 +30,11 @@ Slides become one section each, with their speaker notes folded in — in a lect
 often where the actual definitions are. Word documents split at their headings; PDFs split by page,
 taking the largest type at the top of each as its heading.
 
+Tables are read in all three, and they arrive as the same thing a PDF gutter does: a row becomes one
+line with its cells separated by tabs. A two-column table *is* a term beside its definition, which
+is the shape the tab rule below already reads — so a glossary written as a table, as a typed tab, or
+as two columns on a page all take one path through the rules.
+
 ## What it writes
 
 **Anki's plain-text format** (`--format anki`, the default), which QuickMathPlus reads too, so one
@@ -66,6 +71,11 @@ The rules are deliberately narrow. Slides are full of text that reads like a def
 `Note: see chapter 4`, `Step 2: add the reagent`, `Q3: 14%` — and a rule loose enough to catch every
 real term catches all of those too. Six garbage cards in a deck of forty is worse than thirty clean
 ones, because they have to be found by hand first.
+
+A tab settles *where* the split falls, so it is exempt from the word count that guards against a
+sentence with a dash in the middle of it. It settles nothing about the left-hand side, so the label
+list applies to a tab exactly as it applies to a dash — `Note` names nothing whichever separator
+follows it.
 
 ## The optional model pass
 

@@ -27,8 +27,12 @@ const SEPARATOR = /\s*[—–]\s*|:\s+|\s+-{1,2}\s+/;
  *
  * This list is the difference between the rule working and the rule being useless. Every one of
  * these introduces a definition without being one, and each produced real garbage in testing.
+ *
+ * The last few — "term", "word", "concept", "meaning", "description" — are what a glossary table
+ * puts in its *header* row. Read as a card that row says "Term → Definition", which is true of every
+ * glossary ever written and worth recalling from none of them.
  */
-const NOT_A_TERM = /^(?:notes?|examples?|e\.?g\.?|i\.?e\.?|see|sources?|refs?|references?|fig\.?|figures?|tables?|chapters?|sections?|steps?|tips?|warnings?|cautions?|important|remember|hints?|answers?|solutions?|questions?|q|a|summary|goals?|objectives?|definitions?|def|key|topics?|agenda|outline|today|tomorrow|next|recall|aside|links?|urls?|https?|www|part|page|slide|task|exercise|problem|reading|due|deadline)$/i;
+const NOT_A_TERM = /^(?:notes?|examples?|e\.?g\.?|i\.?e\.?|see|sources?|refs?|references?|fig\.?|figures?|tables?|chapters?|sections?|steps?|tips?|warnings?|cautions?|important|remember|hints?|answers?|solutions?|questions?|q|a|summary|goals?|objectives?|definitions?|def|key|topics?|agenda|outline|today|tomorrow|next|recall|aside|links?|urls?|https?|www|part|page|slide|task|exercise|problem|reading|due|deadline|terms?|words?|concepts?|meanings?|descriptions?|explanations?|column)$/i;
 
 /**
  * Words that give away a clause pretending to be a term.
@@ -75,12 +79,42 @@ export function guid(slug, front) {
  *
  * @returns {{front: string, back: string} | null}
  */
+/**
+ * Does this left-hand side name something, or is it a label wearing a term's clothes?
+ *
+ * Kept apart from `splitTermDef` because two independent questions were tangled together there.
+ * *Where* the split falls is a guess when punctuation implies it and a fact when a tab states it —
+ * but whether "Note" names anything is the same question either way, and the tab path used to skip
+ * this entire list on its way past the guesswork. That made `Note — see chapter 4` a refusal and
+ * `Note<tab>see chapter 4` a card, with the label list not applying to the two layouts that lean on
+ * it hardest: a Word glossary and a two-column PDF.
+ */
+function looksLikeTerm(front) {
+  if (!front || front.length > MAX_FRONT) return false;
+  // Compared with punctuation and digits removed, so that "Chapter 4", "Step 2" and "Q3" are caught
+  // by the plain words in the list rather than needing an entry each.
+  const label = front.toLowerCase().replace(/[^a-z\s.]/g, '').replace(/\s+/g, ' ').trim();
+  if (NOT_A_TERM.test(label)) return false;
+  if (front.split(/\s+/).length > 1 && POINTS_AT_SOMETHING.test(front)) return false;
+  // A term does not end in sentence punctuation; a clause that happens to precede a dash does.
+  if (/[.,;!?]$/.test(front)) return false;
+  if (/https?:\/\//i.test(front)) return false;
+  // "Chapter 4", "Step 2" — a label plus a number is still a label.
+  if (/^\W*\d+\W*$/.test(front)) return false;
+  return true;
+}
+
 export function splitTermDef(text) {
-  // A tab is an explicit column break someone typed on purpose, so it skips the guesswork below —
-  // but not the sanity checks, which are applied to every candidate by `accept`.
+  // A tab is a column break stated outright — typed into a Word glossary, or measured off a PDF's
+  // gutter — so it settles where the split falls, which is all the word count below is for. It
+  // settles nothing about the left side, so `looksLikeTerm` runs on both paths.
   if (text.includes('\t')) {
     const at = text.indexOf('\t');
-    return { front: text.slice(0, at).trim(), back: text.slice(at + 1).trim() };
+    const front = text.slice(0, at).trim();
+    // Any further tabs are a third and fourth column. They are the answer's material, not another
+    // boundary — and left in place they would arrive in the file as columns of their own.
+    const back = text.slice(at + 1).replace(/\t+/g, ' ').trim();
+    return back && looksLikeTerm(front) ? { front, back } : null;
   }
 
   const match = SEPARATOR.exec(text);
@@ -90,21 +124,13 @@ export function splitTermDef(text) {
   const back = text.slice(match.index + match[0].length).trim();
   if (!front || !back) return null;
 
-  if (front.length > MAX_FRONT) return null;
-  const words = front.split(/\s+/).length;
-  if (words > 6) return null;
-  if (words > 1 && POINTS_AT_SOMETHING.test(front)) return null;
-  // A term does not end in sentence punctuation; a clause that happens to precede a dash does.
-  if (/[.,;!?]$/.test(front)) return null;
-  // Compared with punctuation and digits removed, so that "Chapter 4", "Step 2" and "Q3" are caught
-  // by the plain words in the list rather than needing an entry each.
-  const label = front.toLowerCase().replace(/[^a-z\s.]/g, '').replace(/\s+/g, ' ').trim();
-  if (NOT_A_TERM.test(label)) return null;
-  if (/https?:\/\//i.test(front)) return null;
-  // "Chapter 4", "Step 2" — a label plus a number is still a label.
-  if (/^\W*\d+\W*$/.test(front)) return null;
+  // The load-bearing guard, and the one thing an explicit tab genuinely earns an exemption from.
+  // Almost every false positive here is a full sentence with a dash in the middle of it, and almost
+  // every true positive names something in one to three words. Six is generous enough for "Second
+  // law of thermodynamics" and tight enough to reject prose.
+  if (front.split(/\s+/).length > 6) return null;
 
-  return { front, back };
+  return looksLikeTerm(front) ? { front, back } : null;
 }
 
 /**
