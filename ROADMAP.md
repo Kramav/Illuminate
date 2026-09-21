@@ -1,15 +1,17 @@
 # What's left
 
-Illuminate reads all three formats, applies the rules, runs the optional model pass, and writes
+Illuminate reads all four formats, applies the rules, runs the optional model pass, and writes
 files that import. What remained was not new capability — it was the gap between "works on my deck"
 and "I trust this with a semester of lectures."
 
 The target is a **solid, trustworthy tool**: a repo you clone and rely on. Not an npm package, not a
-feature expansion. Publishing, `CONTRIBUTING.md`, OCR and new input formats are all deliberately out
-of scope, listed at the bottom so the decision is on the record rather than forgotten.
+feature expansion. Publishing, `CONTRIBUTING.md` and OCR are deliberately out of scope, listed at
+the bottom so the decision is on the record rather than forgotten. New input formats were too, until
+round four added one — HTML — on purpose.
 
-**Ten items shipped**, one open ([11](#11-on-the-claude-path-max_tokens-is-now-shared-with-thinking)).
-The suite went 46 → 68 → 80 → 85.
+**Eleven items shipped**, one open ([11](#11-on-the-claude-path-max_tokens-is-now-shared-with-thinking))
+and one in prototype ([13](#13-a-check-on-the-cards-against-their-own-source)). The suite went
+46 → 68 → 80 → 85 → 99 → 109.
 
 - **Round one (1–5)** was the repo: a bug that silently broke the thing the project exists to do, no
   tests on the binary, no CI, a README a fresh clone couldn't follow.
@@ -18,6 +20,9 @@ The suite went 46 → 68 → 80 → 85.
   no warning.
 - **Round three (9–11)** is the model pass, the one part of the pipeline neither earlier round looked
   at. 9 and 10 are shipped; 11 is open, because confirming it costs real API calls.
+- **Round four (12)** was a fourth format, HTML, added on purpose and checked against a real page.
+- **Round five (13, prototype)** checks the cards against their own source — free for the invented
+  facts only a model can add, and an optional model review for cards that are true but unusable.
 
 Started at 46 tests passing, which is worth saying plainly: **a green suite is what every round of
 findings has hidden behind.**
@@ -471,3 +476,81 @@ Unchanged. Two things looked at in this round and deliberately left alone:
   and always will be. A real count means a tokenizer per provider, and the thing it would buy —
   packing prompts closer to the true limit — is not worth a dependency when the current problem is
   prompts that exceed it by 5×.
+
+---
+
+# Round four — web pages
+
+## 12. HTML as a fourth input
+
+A reversal of "no new input formats", made deliberately: notes increasingly arrive as a web page — a
+saved LMS page, a Google Docs or Notion export, Word's "Save as Web Page" — and QuickMathPlus is the
+destination either way. Nothing downstream changed. [html.js](src/html.js) produces the same sections
+the other readers do, and the card rules, `merge`, the writers and the import contract are untouched.
+
+The rules it follows are the existing ones. Headings split sections as in Word. A table row is a
+tab-joined line. HTML's definition list (`<dt>`/`<dd>`) joins that same path rather than getting a
+rule of its own. What is new is only what HTML makes necessary:
+
+- **A stack, not regexes.** HTML leaves `</li>`, `</p>` and `</td>` off routinely, so the element
+  walk the Office readers use would misread ordinary pages. A side effect: a table nested in a cell
+  stays in that cell and the outer rows survive, which the Office readers' ponytail cannot promise.
+- **Furniture removal.** `<nav>`, footers, site headers and sidebars, scripts, hidden elements; and
+  when a page has `<main>`, only its inside. Headers and asides inside an article are kept — there
+  they hold the article's title and its callout boxes.
+- **Bold as CSS decides it.** Google Docs' export marks bold only with generated classes, and its
+  clipboard HTML wraps everything in `<b style="font-weight:normal">`. Inline style, then bare-class
+  rules from the page's own stylesheet, then the tag — otherwise every bold lead-in in a Docs file is
+  either missed or drowned.
+- **The declared encoding.** Word writes windows-1252; read as UTF-8 its em dashes become `�` and
+  the `Term — definition` rule stops matching. Decoded by table rather than `TextDecoder`: CI caught
+  Node 20's decoder reading windows-1252 as plain ISO-8859-1, which returns control characters for
+  exactly the em dash and curly quotes — green on 22 and 24, wrong on the version we declare.
+
+Also fixed on the way through, in the shared `decode`: a numeric reference past U+10FFFF threw and
+lost the whole file, and `&constructor;` decoded to `Object`'s constructor.
+
+**Checked on a real page, not just fixtures:** Wikipedia's *Glossary of biology* (397 `<dt>`) →
+304 cards, all importing into QuickMathPlus. The rest went to residue, for honest reasons — empty
+`<dd>`s and definitions over the 300-character limit.
+
+## Still not doing
+
+Unchanged — npm publishing, contributor docs, OCR, PDF bold detection, zip64. Also not in this round:
+fetching a URL directly (save the page, or print it to PDF), site-specific cleanup such as
+Wikipedia's footnote markers, and CSS beyond bare-class `font-weight`.
+
+---
+
+# Round five — checking the cards (prototype)
+
+## 13. A check on the cards, against their own source
+
+Two checks, pointed at the two different ways a card goes wrong. [verify.js](src/verify.js).
+
+- **Grounding, for model-made cards — free, automatic.** A model-made card is the only kind that can
+  contain an invented fact, and the cheapest test for one is a good one: its words should be in the
+  passage it cites. Stems let a paraphrase meet its source; a number must match exactly. Failing
+  cards are dropped, because they were extras and the cost of teaching a wrong one is high.
+- **Review, for every card — `--verify <provider>`.** Asks a model whether a card can be studied as
+  written. Rule-made cards cannot be unsupported, but they can be useless out of context (`Function`),
+  and no string check sees that. Flagged cards are tagged `check`, not removed.
+
+The model plumbing is shared rather than copied: `ask` in [llm.js](src/llm.js) is now the one way to
+reach any provider, used by both passes.
+
+**Tested:** the grounding rules on paraphrase against invention; review's batching, reply parsing,
+retry, and every failure path through a stand-in model; and the full CLI path over real HTTP against
+a fake LM Studio server — an invented "Aquaporin … 1992" card dropped, a vague "Function" card
+tagged, and the deck importing into QuickMathPlus.
+
+**Not yet tested:** how a real model *judges*. Nothing here has run against Ollama, LM Studio or
+Claude, so the review prompt's false-alarm rate is unknown. That is the thing to measure before this
+leaves prototype — run `--verify` on a few real decks and read every flag.
+
+Open questions: the one-in-three rephrasing allowance is a guess to be tuned against real model
+output; `--llm ollama` without a running server still fails the whole run from `defaultModel` (a
+pre-existing inconsistency with the "a dead provider costs one passage" rule; `--verify` handles the
+same case gracefully); and on `claude`, the server-side refusal fallback is not enabled. The review also reaches Claude
+through the same `askClaude`, so it inherits [11](#11-on-the-claude-path-max_tokens-is-now-shared-with-thinking):
+fixing `max_tokens` there fixes it for both passes.

@@ -2,7 +2,7 @@
   "name": "illuminate",
   "version": "0.1.0",
   "private": true,
-  "description": "Turn slides, docs, and PDFs into study sets",
+  "description": "Turn slides, docs, PDFs and web pages into study sets",
   "type": "module",
   "bin": {
     "illuminate": "./illuminate.js"

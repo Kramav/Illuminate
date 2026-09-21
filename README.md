@@ -1,6 +1,6 @@
 # Illuminate
 
-Take slides, word docs, and pdfs and turn it into a simple study set. Paired with a future implementation of my other repository, QuickMathPlux
+Take slides, word docs, pdfs and web pages and turn them into a simple study set. Paired with my other repository, QuickMathPlus, which imports what this writes.
 
 ```sh
 npm install                                   # once — pdfjs, for reading PDFs
@@ -8,13 +8,13 @@ node illuminate.js lecture3.pptx --tag bio101
 # → lecture3.txt, importable into Anki and QuickMathPlus unchanged
 ```
 
-Node 20 or newer. `npm install` pulls one dependency, and only PDFs need it — `.pptx` and `.docx`
-work without it, so a clone that skipped the step reads two formats of three and says so clearly on
-the third. `node illuminate.js --check` reports which.
+Node 20 or newer. `npm install` pulls one dependency, and only PDFs need it — every other format
+works without it, so a clone that skipped the step reads everything but PDFs and says so clearly on
+one. `node illuminate.js --check` reports which.
 
 ## What it reads
 
-`.pptx`, `.docx` and `.pdf`.
+`.pptx`, `.docx`, `.pdf`, and web pages (`.html`, `.htm`).
 
 The Office formats need no dependency — both are ZIP archives of XML, so `node:zlib` plus a
 central-directory reader covers them. PDF gets the project's only dependency, `pdfjs-dist`, because
@@ -30,10 +30,19 @@ Slides become one section each, with their speaker notes folded in — in a lect
 often where the actual definitions are. Word documents split at their headings; PDFs split by page,
 taking the largest type at the top of each as its heading.
 
-Tables are read in all three, and they arrive as the same thing a PDF gutter does: a row becomes one
-line with its cells separated by tabs. A two-column table *is* a term beside its definition, which
-is the shape the tab rule below already reads — so a glossary written as a table, as a typed tab, or
-as two columns on a page all take one path through the rules.
+Tables are read in all of them, and they arrive as the same thing a PDF gutter does: a row becomes
+one line with its cells separated by tabs. A two-column table *is* a term beside its definition,
+which is the shape the tab rule below already reads — so a glossary written as a table, as a typed
+tab, or as two columns on a page all take one path through the rules.
+
+Web pages read like Word documents: headings split them, bold is kept, tables become tab rows. HTML's
+own glossary markup, `<dl>` with `<dt>` and `<dd>`, becomes the same tab line, so a glossary page
+converts almost entirely by rule. The page around the content is left behind — navigation, site
+header, footer, sidebar, scripts, anything hidden — and a page that marks its content with `<main>`
+is read only inside it. It is written for what actually produces HTML notes: a saved page, a Google
+Docs or Notion export, and Word's "Save as Web Page", whose windows-1252 encoding is honoured so its
+em dashes still split cards. No dependency; a page that only fills itself in with JavaScript saves as
+an empty shell, and the tool says so and suggests printing it to PDF instead.
 
 ## What it writes
 
@@ -103,11 +112,34 @@ across several — so a Word file written without heading styles, which is one s
 whole document, does not become a single prompt past what a local model can actually read. The
 progress lines count those requests, not your sections.
 
+## Checking the cards
+
+```sh
+node illuminate.js lecture3.pptx --llm ollama --verify ollama
+```
+
+Two checks, and only the second needs a model.
+
+**Grounding** runs on every model-made card, automatically and for free. It checks that the card's
+words are actually in the passage it cites — both sides, since QuickMathPlus drills cards in reverse
+too. Rephrasing is allowed (about one word in three, and "moves" matches "movement"); a number the
+passage never states is not. A card that fails is dropped and printed with the words that gave it
+away, because an invented fact is the one thing a model-made card can add that a rule-made one
+cannot. Rule-made cards skip this: they are copied from the source, so they cannot fail it.
+
+**Review** (`--verify <provider>`) asks a model about every card whether it can be studied as
+written: is the answer in the passage, does the card make sense away from its slide (`Function` does
+not), does the answer answer the question. The same providers as `--llm`, so a local model keeps it
+free and keeps your notes on your machine. Flagged cards are **tagged `check`, never removed** — the
+reviewer is less reliable than the rules it reviews — and listed with a reason. A reviewer that is
+down or answering nonsense leaves its cards unchecked and says so; the deck is written either way.
+
 ## Options
 
 ```
 --out <path>      where to write        --format anki | quizlet | json
 --llm <provider>  none | ollama | lmstudio | claude    --model <name>
+--verify <provider>  flag cards that need a second look (same providers as --llm)
 --tag <tag>       extra tag, no spaces  --min <n>     refuse to write a deck smaller than n
 --dry-run         print, don't write    --residue     show what no rule could read
 --check           report what's available and how to get what isn't

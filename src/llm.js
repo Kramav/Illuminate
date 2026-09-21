@@ -121,13 +121,13 @@ function chunk(residue) {
 }
 
 /**
- * Get JSON out of whatever the model actually said.
+ * Get JSON out of whatever the model actually said, and the array it was asked for under `key`.
  *
  * Local models in particular like to introduce themselves before answering, or wrap the answer in a
  * fenced code block, no matter how the request was phrased. Slicing between the outermost braces
  * recovers the object from both without caring which happened.
  */
-export function parseCards(text) {
+export function parseJson(text, key) {
   if (!text) return null;
   const body = String(text).replace(/^[\s\S]*?```(?:json)?/i, '').replace(/```[\s\S]*$/, '');
   const source = body.includes('{') ? body : String(text);
@@ -136,20 +136,22 @@ export function parseCards(text) {
   if (start < 0 || end <= start) return null;
   try {
     const parsed = JSON.parse(source.slice(start, end + 1));
-    return Array.isArray(parsed?.cards) ? parsed.cards : null;
+    return Array.isArray(parsed?.[key]) ? parsed[key] : null;
   } catch {
     return null;
   }
 }
 
-async function askLocal(provider, model, prompt, signal) {
+export const parseCards = (text) => parseJson(text, 'cards');
+
+async function askLocal(provider, model, system, prompt, signal) {
   const { base, label } = LOCAL[provider];
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       model,
-      messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }],
+      messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
       temperature: 0,
       stream: false,
       response_format: { type: 'json_object' },
@@ -161,33 +163,43 @@ async function askLocal(provider, model, prompt, signal) {
   return data?.choices?.[0]?.message?.content ?? '';
 }
 
-async function askClaude(model, prompt) {
+async function askClaude(model, system, schema, prompt) {
   let Anthropic;
   try {
     ({ default: Anthropic } = await import('@anthropic-ai/sdk'));
   } catch {
-    throw new Error('--llm claude needs the Anthropic SDK: npm install @anthropic-ai/sdk');
+    throw new Error('the claude provider needs the Anthropic SDK: npm install @anthropic-ai/sdk');
   }
   const client = new Anthropic();
   const message = await client.messages.create({
     model,
     max_tokens: 8000,
-    system: SYSTEM,
+    system,
     messages: [{ role: 'user', content: prompt }],
     // A schema rather than a plea in the prompt: this is a mechanical extraction, so constrain the
     // shape and spend the effort budget on reading the passage instead of on formatting.
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
+    output_config: { effort: 'low', format: { type: 'json_schema', schema } },
   });
   if (message.stop_reason === 'refusal') throw new Error('Claude declined this passage');
   return message.content.find((block) => block.type === 'text')?.text ?? '';
 }
 
+/**
+ * One request to any provider, returning the reply as text.
+ *
+ * Exported so the review pass in verify.js asks its own question through exactly this plumbing — the
+ * same ports, the same SDK import, the same refusal handling — rather than a second copy of it.
+ * `schema` constrains Claude's reply; local servers only get the shape the prompt describes.
+ */
+export function ask({ provider, model, system, schema, prompt, signal }) {
+  return provider === 'claude'
+    ? askClaude(model, system, schema, prompt)
+    : askLocal(provider, model, system, prompt, signal);
+}
+
 /** One request, with a single retry — a local model that rambles once will often comply when told. */
 async function askOnce(provider, model, prompt, signal) {
-  const reply = provider === 'claude'
-    ? await askClaude(model, prompt)
-    : await askLocal(provider, model, prompt, signal);
-  return parseCards(reply);
+  return parseCards(await ask({ provider, model, system: SYSTEM, schema: SCHEMA, prompt, signal }));
 }
 
 /**
@@ -239,7 +251,7 @@ export async function expand(residue, { provider, model, refs, onProgress = () =
 }
 
 /** Whatever the local server already has loaded, so `--llm ollama` works without also naming a model. */
-async function defaultModel(provider) {
+export async function defaultModel(provider) {
   if (provider === 'claude') return DEFAULT_CLAUDE_MODEL;
   const found = (await probe(provider)).models?.[0];
   if (!found) throw new Error(`no model available from ${LOCAL[provider].label} — pull one first`);

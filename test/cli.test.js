@@ -114,7 +114,7 @@ test('--version and --help answer without needing a file', inTempDir(async ({ cl
 test('no arguments prints usage and exits non-zero', inTempDir(async ({ cli }) => {
   const err = await failing(cli());
   assert.equal(err.code, 1);
-  assert.match(err.stdout, /turn slides, documents and PDFs/);
+  assert.match(err.stdout, /turn slides, documents, PDFs and web pages/);
 }));
 
 /* -------------------------------------------------------------------------- */
@@ -162,7 +162,7 @@ test('a missing file, a bad extension, and a missing output directory each say s
     assert.ok(!/ENOENT/.test(missing.stderr), `leaked Node's own error: ${missing.stderr}`);
 
     const unknown = await failing(cli('notes.key'));
-    assert.match(unknown.stderr, /cannot read \.key files \(known: \.pptx, \.docx, \.pdf\)/);
+    assert.match(unknown.stderr, /cannot read \.key files \(known: \.pptx, \.docx, \.pdf, \.html, \.htm\)/);
 
     write('lecture3.pptx', DECK);
     const nodir = await failing(cli('lecture3.pptx', '--out', 'nodir/deck.txt'));
@@ -231,3 +231,61 @@ test('the multi-file deck imports into QuickMathPlus', inTempDir(async ({ dir, c
   const set = parseSet(readFileSync(join(dir, 'combined.txt'), 'utf8'), { name: 'combined.txt' });
   assert.equal(set.cards.length, 4);
 }));
+
+/**
+ * The same contract for a web page — the whole path, from a saved page with a site around it to a
+ * file QuickMathPlus accepts. The page carries every shape the HTML reader turns into a card, plus
+ * the chrome it has to leave behind, so a regression in either shows up as a count here.
+ */
+test('a saved web page converts, and the deck imports into QuickMathPlus',
+  inTempDir(async ({ dir, cli, write, t }) => {
+    write('week1.html', `<!doctype html><html><head><title>BIO 101 — Week 1</title></head><body>
+      <header><nav><a href="/">Home</a> <a href="/syllabus">Syllabus — the course plan</a></nav></header>
+      <main>
+        <h1>Cell Transport</h1>
+        <p><strong>Osmosis</strong> the movement of water across a membrane</p>
+        <p>Diffusion — movement from high to low concentration; no energy needed</p>
+        <h2>Glossary</h2>
+        <table><tr><th>Term</th><th>Definition</th></tr>
+          <tr><td>Catalyst</td><td>a substance that speeds a reaction up</td></tr></table>
+        <dl><dt>Substrate</dt><dd>what an enzyme acts on</dd></dl>
+      </main>
+      <footer>Contact — the department office</footer>
+    </body></html>`);
+    const { stderr } = await cli('week1.html', '--tag', 'bio101');
+    assert.match(stderr, /wrote 4 cards to week1\.txt/);
+
+    const url = new URL('../../QuickMathPlus/www/src/cards.js', import.meta.url);
+    if (!existsSync(fileURLToPath(url))) {
+      return t.skip('QuickMathPlus is not checked out beside this repo');
+    }
+    const { parseSet } = await import(url.href);
+    const set = parseSet(readFileSync(join(dir, 'week1.txt'), 'utf8'), { name: 'week1.txt' });
+    assert.deepEqual(set.cards.map((c) => c.front), ['Osmosis', 'Diffusion', 'Catalyst', 'Substrate']);
+    // The `;` in the source would have been read as a second accepted answer — see `safeBack`.
+    assert.equal(set.cards[1].back, 'movement from high to low concentration, no energy needed');
+    for (const { tags } of set.cards) {
+      assert.equal(tags.length, 3);
+      assert.deepEqual([tags[0], tags[2]], ['week1', 'bio101']);
+      assert.match(tags[1], /^sec-\d+$/);
+    }
+  }));
+
+/* -------------------------------------------------------------------------- */
+/* --verify                                                                   */
+/* -------------------------------------------------------------------------- */
+
+test('--verify names what it expects, and a reviewer that is not running costs no cards',
+  inTempDir(async ({ dir, cli, write }) => {
+    write('lecture3.pptx', DECK);
+
+    const bad = await failing(cli('lecture3.pptx', '--verify', 'gpt'));
+    assert.match(bad.stderr, /unknown --verify "gpt".*ollama/);
+
+    // Nothing listens on this port during the suite, which is the case being tested: the review is
+    // lost, the deck is not.
+    const { stderr } = await cli('lecture3.pptx', '--verify', 'lmstudio', '--model', 'nothing-is-listening');
+    assert.match(stderr, /verify lmstudio: 2 could not be checked\n/);
+    assert.match(stderr, /wrote 2 cards to lecture3\.txt/);
+    assert.ok(!readFileSync(join(dir, 'lecture3.txt'), 'utf8').includes('check'), 'an unchecked card was tagged');
+  }));
