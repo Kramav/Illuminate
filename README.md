@@ -107,11 +107,34 @@ Model-made cards go through the same acceptance gate as rule-made ones and are t
 can be filtered back to what a rule was confident about. A provider that is down, slow, or answering
 with prose costs that passage and nothing else — the rule-made cards are already in hand.
 
+## Checking the cards
+
+```sh
+node illuminate.js lecture3.pptx --llm ollama --verify ollama
+```
+
+Two checks, and only the second needs a model.
+
+**Grounding** runs on every model-made card, automatically and for free. It checks that the card's
+words are actually in the passage it cites — both sides, since QuickMathPlus drills cards in reverse
+too. Rephrasing is allowed (about one word in three, and "moves" matches "movement"); a number the
+passage never states is not. A card that fails is dropped and printed with the words that gave it
+away, because an invented fact is the one thing a model-made card can add that a rule-made one
+cannot. Rule-made cards skip this: they are copied from the source, so they cannot fail it.
+
+**Review** (`--verify <provider>`) asks a model about every card whether it can be studied as
+written: is the answer in the passage, does the card make sense away from its slide (`Function` does
+not), does the answer answer the question. The same providers as `--llm`, so a local model keeps it
+free and keeps your notes on your machine. Flagged cards are **tagged `check`, never removed** — the
+reviewer is less reliable than the rules it reviews — and listed with a reason. A reviewer that is
+down or answering nonsense leaves its cards unchecked and says so; the deck is written either way.
+
 ## Options
 
 ```
 --out <path>      where to write        --format anki | quizlet | json
 --llm <provider>  none | ollama | lmstudio | claude    --model <name>
+--verify <provider>  flag cards that need a second look (same providers as --llm)
 --tag <tag>       extra tag, no spaces  --min <n>     refuse to write a deck smaller than n
 --dry-run         print, don't write    --residue     show what no rule could read
 --check           report what's available and how to get what isn't

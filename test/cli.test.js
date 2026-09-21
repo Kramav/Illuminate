@@ -270,3 +270,22 @@ test('a saved web page converts, and the deck imports into QuickMathPlus',
       assert.match(tags[1], /^sec-\d+$/);
     }
   }));
+
+/* -------------------------------------------------------------------------- */
+/* --verify                                                                   */
+/* -------------------------------------------------------------------------- */
+
+test('--verify names what it expects, and a reviewer that is not running costs no cards',
+  inTempDir(async ({ dir, cli, write }) => {
+    write('lecture3.pptx', DECK);
+
+    const bad = await failing(cli('lecture3.pptx', '--verify', 'gpt'));
+    assert.match(bad.stderr, /unknown --verify "gpt".*ollama/);
+
+    // Nothing listens on this port during the suite, which is the case being tested: the review is
+    // lost, the deck is not.
+    const { stderr } = await cli('lecture3.pptx', '--verify', 'lmstudio', '--model', 'nothing-is-listening');
+    assert.match(stderr, /verify lmstudio: 2 could not be checked\n/);
+    assert.match(stderr, /wrote 2 cards to lecture3\.txt/);
+    assert.ok(!readFileSync(join(dir, 'lecture3.txt'), 'utf8').includes('check'), 'an unchecked card was tagged');
+  }));

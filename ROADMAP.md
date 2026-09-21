@@ -9,7 +9,8 @@ feature expansion. Publishing, `CONTRIBUTING.md` and OCR are deliberately out of
 the bottom so the decision is on the record rather than forgotten. New input formats were too, until
 round three added one — HTML — on purpose.
 
-Three rounds, **nine items, all shipped**. The suite went 46 → 68 → 80 → 93.
+Three rounds, **nine items, all shipped**, and a fourth in prototype. The suite went
+46 → 68 → 80 → 93 → 103.
 
 - **Round one (1–5)** was the repo: a bug that silently broke the thing the project exists to do, no
   tests on the binary, no CI, a README a fresh clone couldn't follow.
@@ -17,6 +18,8 @@ Three rounds, **nine items, all shipped**. The suite went 46 → 68 → 80 → 9
   round one never tested. Two of the three were silent: content dropped with no card, no residue and
   no warning.
 - **Round three (9)** was a fourth format, HTML, added on purpose and checked against a real page.
+- **Round four (10, prototype)** checks the cards against their own source — free for the invented
+  facts only a model can add, and an optional model review for cards that are true but unusable.
 
 Started at 46 tests passing, which is worth saying plainly: **a green suite is what both rounds of
 findings hid behind.**
@@ -358,3 +361,36 @@ lost the whole file, and `&constructor;` decoded to `Object`'s constructor.
 Unchanged — npm publishing, contributor docs, OCR, PDF bold detection, zip64. Also not in this round:
 fetching a URL directly (save the page, or print it to PDF), site-specific cleanup such as
 Wikipedia's footnote markers, and CSS beyond bare-class `font-weight`.
+
+---
+
+# Round four — checking the cards (prototype)
+
+## 10. A check on the cards, against their own source
+
+Two checks, pointed at the two different ways a card goes wrong. [verify.js](src/verify.js).
+
+- **Grounding, for model-made cards — free, automatic.** A model-made card is the only kind that can
+  contain an invented fact, and the cheapest test for one is a good one: its words should be in the
+  passage it cites. Stems let a paraphrase meet its source; a number must match exactly. Failing
+  cards are dropped, because they were extras and the cost of teaching a wrong one is high.
+- **Review, for every card — `--verify <provider>`.** Asks a model whether a card can be studied as
+  written. Rule-made cards cannot be unsupported, but they can be useless out of context (`Function`),
+  and no string check sees that. Flagged cards are tagged `check`, not removed.
+
+The model plumbing is shared rather than copied: `ask` in [llm.js](src/llm.js) is now the one way to
+reach any provider, used by both passes.
+
+**Tested:** the grounding rules on paraphrase against invention; review's batching, reply parsing,
+retry, and every failure path through a stand-in model; and the full CLI path over real HTTP against
+a fake LM Studio server — an invented "Aquaporin … 1992" card dropped, a vague "Function" card
+tagged, and the deck importing into QuickMathPlus.
+
+**Not yet tested:** how a real model *judges*. Nothing here has run against Ollama, LM Studio or
+Claude, so the review prompt's false-alarm rate is unknown. That is the thing to measure before this
+leaves prototype — run `--verify` on a few real decks and read every flag.
+
+Open questions: the one-in-three rephrasing allowance is a guess to be tuned against real model
+output; `--llm ollama` without a running server still fails the whole run from `defaultModel` (a
+pre-existing inconsistency with the "a dead provider costs one passage" rule; `--verify` handles the
+same case gracefully); and on `claude`, the server-side refusal fallback is not enabled.
