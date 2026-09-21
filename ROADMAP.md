@@ -5,16 +5,18 @@ files that import. What remained was not new capability — it was the gap betwe
 and "I trust this with a semester of lectures."
 
 The target is a **solid, trustworthy tool**: a repo you clone and rely on. Not an npm package, not a
-feature expansion. Publishing, `CONTRIBUTING.md`, OCR and new input formats are all deliberately out
-of scope, listed at the bottom so the decision is on the record rather than forgotten.
+feature expansion. Publishing, `CONTRIBUTING.md` and OCR are deliberately out of scope, listed at
+the bottom so the decision is on the record rather than forgotten. New input formats were too, until
+round three added one — HTML — on purpose.
 
-Two rounds, **eight items, all shipped**. The suite went 46 → 68 → 80.
+Three rounds, **nine items, all shipped**. The suite went 46 → 68 → 80 → 93.
 
 - **Round one (1–5)** was the repo: a bug that silently broke the thing the project exists to do, no
   tests on the binary, no CI, a README a fresh clone couldn't follow.
 - **Round two (6–8)** was the reading — the shapes real lecture material actually arrives in, which
   round one never tested. Two of the three were silent: content dropped with no card, no residue and
   no warning.
+- **Round three (9)** was a fourth format, HTML, added on purpose and checked against a real page.
 
 Started at 46 tests passing, which is worth saying plainly: **a green suite is what both rounds of
 findings hid behind.**
@@ -315,3 +317,44 @@ formats. One limit added while building tables: **a table nested inside a table'
 outer table's remaining rows, because the element walk is non-greedy. Word permits the nesting and a
 glossary does not use it, and the failure is missing rows rather than wrong ones. Noted as a
 `ponytail` in [xml.js](src/xml.js) and [docx.js](src/docx.js) beside the others.
+
+---
+
+# Round three — web pages
+
+## 9. HTML as a fourth input
+
+A reversal of "no new input formats", made deliberately: notes increasingly arrive as a web page — a
+saved LMS page, a Google Docs or Notion export, Word's "Save as Web Page" — and QuickMathPlus is the
+destination either way. Nothing downstream changed. [html.js](src/html.js) produces the same sections
+the other readers do, and the card rules, `merge`, the writers and the import contract are untouched.
+
+The rules it follows are the existing ones. Headings split sections as in Word. A table row is a
+tab-joined line. HTML's definition list (`<dt>`/`<dd>`) joins that same path rather than getting a
+rule of its own. What is new is only what HTML makes necessary:
+
+- **A stack, not regexes.** HTML leaves `</li>`, `</p>` and `</td>` off routinely, so the element
+  walk the Office readers use would misread ordinary pages. A side effect: a table nested in a cell
+  stays in that cell and the outer rows survive, which the Office readers' ponytail cannot promise.
+- **Furniture removal.** `<nav>`, footers, site headers and sidebars, scripts, hidden elements; and
+  when a page has `<main>`, only its inside. Headers and asides inside an article are kept — there
+  they hold the article's title and its callout boxes.
+- **Bold as CSS decides it.** Google Docs' export marks bold only with generated classes, and its
+  clipboard HTML wraps everything in `<b style="font-weight:normal">`. Inline style, then bare-class
+  rules from the page's own stylesheet, then the tag — otherwise every bold lead-in in a Docs file is
+  either missed or drowned.
+- **The declared encoding.** Word writes windows-1252; read as UTF-8 its em dashes become `�` and
+  the `Term — definition` rule stops matching.
+
+Also fixed on the way through, in the shared `decode`: a numeric reference past U+10FFFF threw and
+lost the whole file, and `&constructor;` decoded to `Object`'s constructor.
+
+**Checked on a real page, not just fixtures:** Wikipedia's *Glossary of biology* (397 `<dt>`) →
+304 cards, all importing into QuickMathPlus. The rest went to residue, for honest reasons — empty
+`<dd>`s and definitions over the 300-character limit.
+
+## Still not doing
+
+Unchanged — npm publishing, contributor docs, OCR, PDF bold detection, zip64. Also not in this round:
+fetching a URL directly (save the page, or print it to PDF), site-specific cleanup such as
+Wikipedia's footnote markers, and CSS beyond bare-class `font-weight`.

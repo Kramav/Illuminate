@@ -11,6 +11,7 @@ import { parseArgs } from 'node:util';
 import { readPptx } from './src/pptx.js';
 import { readDocx } from './src/docx.js';
 import { readPdf } from './src/pdf.js';
+import { readHtml } from './src/html.js';
 import { buildDoc, slugify } from './src/doc.js';
 import { extract, finalize, merge } from './src/cards.js';
 import { expand, check, withoutDuplicates, PROVIDERS } from './src/llm.js';
@@ -19,7 +20,7 @@ import { render, FORMATS, EXTENSION } from './src/write.js';
 const { version } = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 const USAGE = `
-illuminate — turn slides, documents and PDFs into a study set
+illuminate — turn slides, documents, PDFs and web pages into a study set
 
   node illuminate.js <files...> [options]
 
@@ -35,7 +36,9 @@ illuminate — turn slides, documents and PDFs into a study set
   --help             --version
 `.trim();
 
-const READERS = { '.pptx': readPptx, '.docx': readDocx, '.pdf': readPdf };
+const READERS = {
+  '.pptx': readPptx, '.docx': readDocx, '.pdf': readPdf, '.html': readHtml, '.htm': readHtml,
+};
 
 /**
  * Say what went wrong in the same voice as the rest of the CLI.

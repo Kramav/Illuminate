@@ -9,16 +9,23 @@
 
 const ENTITIES = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
-/** Undo XML escaping, including the numeric forms Word writes for typographic punctuation. */
-export function decode(s) {
+/**
+ * Undo XML escaping, including the numeric forms Word writes for typographic punctuation.
+ *
+ * `names` is the table of named entities, which is XML's five unless a caller brings more — html.js
+ * does, since HTML names hundreds. A reference to a code point past Unicode's last is left as written
+ * rather than handed to `fromCodePoint`, which would throw and lose the whole file over one character.
+ */
+export function decode(s, names = ENTITIES) {
   return String(s).replace(/&(#x?[0-9a-fA-F]+|\w+);/g, (whole, body) => {
     if (body[0] === '#') {
       const code = body[1] === 'x' || body[1] === 'X'
         ? parseInt(body.slice(2), 16)
         : parseInt(body.slice(1), 10);
-      return Number.isFinite(code) ? String.fromCodePoint(code) : whole;
+      return Number.isFinite(code) && code <= 0x10ffff ? String.fromCodePoint(code) : whole;
     }
-    return ENTITIES[body] ?? whole;
+    // Own properties only: `&constructor;` would otherwise find Object's, and write a function out.
+    return Object.hasOwn(names, body) ? names[body] : whole;
   });
 }
 
