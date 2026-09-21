@@ -105,6 +105,30 @@ const TOKEN = /<!--[\s\S]*?(?:-->|$)|<![^>]*>|<\?[^>]*>|<\/([A-Za-z][^\s/>]*)[^>
 const ATTRIBUTE = /([^\s"'=/>]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+)))?/g;
 
 /**
+ * Every name browsers read as windows-1252 — ISO-8859-1 and ASCII included, per the WHATWG encoding
+ * standard, because pages that declare those were almost always written in windows-1252 anyway.
+ */
+const WINDOWS_1252 = new Set(['ansi_x3.4-1968', 'ascii', 'cp1252', 'cp819', 'csisolatin1', 'ibm819',
+  'iso-8859-1', 'iso-ir-100', 'iso8859-1', 'iso88591', 'iso_8859-1', 'iso_8859-1:1987', 'l1', 'latin1',
+  'us-ascii', 'windows-1252', 'x-cp1252']);
+
+/** What windows-1252 puts at 0x80–0x9F, where ISO-8859-1 has control codes. Unassigned bytes pass through. */
+const CP1252_HIGH = [0x20ac, 0x81, 0x201a, 0x192, 0x201e, 0x2026, 0x2020, 0x2021, 0x2c6, 0x2030, 0x160,
+  0x2039, 0x152, 0x8d, 0x17d, 0x8f, 0x90, 0x2018, 0x2019, 0x201c, 0x201d, 0x2022, 0x2013, 0x2014, 0x2dc,
+  0x2122, 0x161, 0x203a, 0x153, 0x9d, 0x17e, 0x178];
+
+/**
+ * windows-1252 by hand rather than through TextDecoder, which on Node 20 reads the label as plain
+ * ISO-8859-1 and returns control characters for exactly the bytes this exists to get right — the em
+ * dash and the curly quotes. Everything outside 0x80–0x9F is the byte's own code point.
+ */
+function cp1252(bytes) {
+  let out = '';
+  for (const b of bytes) out += String.fromCharCode(b >= 0x80 && b < 0xa0 ? CP1252_HIGH[b - 0x80] : b);
+  return out;
+}
+
+/**
  * The page's text, in whatever encoding it says it is in.
  *
  * Mostly UTF-8 — but Word's "Save as Web Page" writes windows-1252, and read as UTF-8 every curly
@@ -122,6 +146,7 @@ function textOf(buf) {
   // A page whose declaration could be read as ASCII is not UTF-16, whatever it says — browsers
   // settle that contradiction as UTF-8, and so does this.
   const label = bom ?? (declared && !/^utf-?16/i.test(declared) ? declared : 'utf-8');
+  if (WINDOWS_1252.has(label.toLowerCase())) return cp1252(bytes);
   try {
     return new TextDecoder(label).decode(bytes);
   } catch {

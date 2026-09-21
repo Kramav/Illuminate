@@ -180,6 +180,17 @@ test('html: Word\'s windows-1252 output decodes, so its em dashes still split ca
   assert.deepEqual(extract(doc).cards.map((c) => c.front), ['Osmosis']);
 });
 
+test('html: a page declaring iso-8859-1 is read as windows-1252, as browsers read it', () => {
+  // The bytes at 0x80–0x9F are where the two differ, and where Node 20's own decoder got it wrong:
+  // it returned control characters for them, which CI caught.
+  const page = Buffer.concat([
+    Buffer.from('<meta charset="ISO-8859-1"><p>', 'latin1'),
+    Buffer.from([0x80, 0x20, 0x85, 0x20, 0x99, 0x20, 0x9f, 0x20, 0x81]),
+    Buffer.from('</p>', 'latin1'),
+  ]);
+  assert.equal(readHtml(page)[0].lines[0].text, '€ … ™ Ÿ \u0081');
+});
+
 test('html: <pre> keeps its line breaks and its tabs', () => {
   assert.deepEqual(textOf(read('<pre>Osmosis\twater across a membrane\nDiffusion\tdown a gradient</pre>')), [
     'Osmosis\twater across a membrane',

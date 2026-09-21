@@ -11,7 +11,7 @@ round four added one — HTML — on purpose.
 
 **Eleven items shipped**, one open ([11](#11-on-the-claude-path-max_tokens-is-now-shared-with-thinking))
 and one in prototype ([13](#13-a-check-on-the-cards-against-their-own-source)). The suite went
-46 → 68 → 80 → 85 → 98 → 108.
+46 → 68 → 80 → 85 → 99 → 109.
 
 - **Round one (1–5)** was the repo: a bug that silently broke the thing the project exists to do, no
   tests on the binary, no CI, a README a fresh clone couldn't follow.
@@ -503,7 +503,9 @@ rule of its own. What is new is only what HTML makes necessary:
   rules from the page's own stylesheet, then the tag — otherwise every bold lead-in in a Docs file is
   either missed or drowned.
 - **The declared encoding.** Word writes windows-1252; read as UTF-8 its em dashes become `�` and
-  the `Term — definition` rule stops matching.
+  the `Term — definition` rule stops matching. Decoded by table rather than `TextDecoder`: CI caught
+  Node 20's decoder reading windows-1252 as plain ISO-8859-1, which returns control characters for
+  exactly the em dash and curly quotes — green on 22 and 24, wrong on the version we declare.
 
 Also fixed on the way through, in the shared `decode`: a numeric reference past U+10FFFF threw and
 lost the whole file, and `&constructor;` decoded to `Object`'s constructor.
