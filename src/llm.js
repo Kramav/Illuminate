@@ -63,23 +63,58 @@ Reply with JSON only, in this shape:
 {"cards":[{"ref":"slide-3","front":"...","back":"..."}]}
 If nothing is worth carding, reply {"cards":[]}.`;
 
+/**
+ * One passage as one or more request-sized blocks, each labelled with its section.
+ *
+ * Splitting *within* a passage is what keeps `CHUNK` a ceiling rather than only a floor. A section
+ * can be the whole document — `readDocx` opens a new one at a heading, so a handout typed without
+ * heading styles arrives as a single passage — and a local server does not refuse a prompt past its
+ * context. It drops what does not fit, which pushes the rules in `SYSTEM` out of view and produces
+ * cards that quietly stop obeying them.
+ *
+ * The cut falls on the newline `extract` joined the leftover lines with, so it lands between lines
+ * rather than mid-sentence. The label is repeated on every piece, because a card from the tail has
+ * to name the same section as one from the head.
+ *
+ * ponytail: a single line longer than CHUNK is still sent whole. There is no boundary inside it we
+ * could trust, and one over-long line is a smaller problem than the document it used to carry.
+ */
+function blocksFor(entry) {
+  const label = `[${entry.ref}]${entry.title ? ` ${entry.title}` : ''}`;
+  const room = Math.max(CHUNK - label.length - 1, 1);
+  const blocks = [];
+  let lines = [];
+  let size = 0;
+  for (const line of entry.text.trim().split('\n')) {
+    if (size + line.length > room && lines.length) {
+      blocks.push(lines);
+      lines = [];
+      size = 0;
+    }
+    lines.push(line);
+    size += line.length + 1;
+  }
+  if (lines.length) blocks.push(lines);
+  return blocks.map((ls) => `${label}\n${ls.join('\n')}`);
+}
+
 /** Group residue into request-sized batches, keeping each passage labelled with its section. */
 function chunk(residue) {
   const chunks = [];
   let current = [];
   let size = 0;
   for (const entry of residue) {
-    const text = entry.text.trim();
     // Under a sentence or so there is nothing to extract, and it costs a request to find that out.
-    if (text.length < 60) continue;
-    const block = `[${entry.ref}]${entry.title ? ` ${entry.title}` : ''}\n${text}`;
-    if (size + block.length > CHUNK && current.length) {
-      chunks.push(current);
-      current = [];
-      size = 0;
+    if (entry.text.trim().length < 60) continue;
+    for (const block of blocksFor(entry)) {
+      if (size + block.length > CHUNK && current.length) {
+        chunks.push(current);
+        current = [];
+        size = 0;
+      }
+      current.push(block);
+      size += block.length;
     }
-    current.push(block);
-    size += block.length;
   }
   if (current.length) chunks.push(current);
   return chunks.map((blocks) => blocks.join('\n\n'));
