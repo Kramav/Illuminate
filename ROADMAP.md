@@ -471,3 +471,53 @@ Unchanged. Two things looked at in this round and deliberately left alone:
   and always will be. A real count means a tokenizer per provider, and the thing it would buy —
   packing prompts closer to the true limit — is not worth a dependency when the current problem is
   prompts that exceed it by 5×.
+
+---
+
+# Round four — study sheets
+
+A second output beside the cards: a general-review sheet for an exam, built from a course's decks.
+The judgement in it (writing notes, merging them) is done by a model against
+[TEMPLATE.md](TEMPLATE.md). Everything that can be checked instead of trusted is `study.js`.
+
+Scoped against five real 2026 lecture decks (274 slides) before any code was written. That check
+changed the plan twice:
+
+- **No native Office Math at all.** All 86 equations are Equation Editor 3.0 or MathType OLE objects,
+  which are pictures to everything except the program that made them. The planned OMML → LaTeX
+  converter would have had nothing to convert. What was built instead: count each equation, record
+  its box, and crop it from a high-resolution render so it can be read at full size. LibreOffice
+  keeps these objects as raw OLE even with its MathType import switched on, so it can't decode them
+  either.
+- **Two silent losses in the reader that the decks exposed.** Symbol-font Greek (249 characters, e.g.
+  `F_β Score` read as `F_ Score`) and 297 superscript/subscript runs (`w_ij` read as `wij`). Both are
+  fixed, and the Greek fix improves card text too.
+
+## Shipped
+
+- [x] **Slides in presentation order** (`sldIdLst`), with **hidden slides** kept and marked.
+- [x] **`mc:Fallback` ignored**, so an equation isn't also a picture and a text box isn't read twice.
+- [x] **Visuals per slide**: pictures, charts, SmartArt, equation objects with boxes, other OLE,
+  diagrams drawn from groups and connectors. Each slide says *why* it needs an image.
+- [x] **Symbol font decoded**, [symbol.js](src/symbol.js), tested at both ends of the table.
+- [x] **Rendering**: LibreOffice → PDF with hidden slides exported (its default drops them, which was
+  verified), page count checked against slide count, pdfjs + `@napi-rs/canvas` → PNG, and an
+  equation crop from a 4800px render.
+- [x] **Checks**: coverage (every slide cited or skipped, every citation real), merge preservation
+  (nothing cited in the notes is dropped from the sheet), concept index, review page.
+- [x] **Resumable**: content hashes and versions in `manifest.json` and in each notes file's stamp.
+
+`@napi-rs/canvas` became a declared dependency instead of an incidental optional one of pdfjs, pinned
+to 1.0.10. 1.0.12 was hours old when this was written.
+
+## Still not doing
+
+- **Decoding Equation Editor / MathType objects to LaTeX.** That means MTEF v3 and v5 inside OLE
+  compound files. The nearest maintained tool is Ruby → MathML ([mathtype_to_mathml]). Equations are
+  read from crops instead, and the review page puts every formula beside its crop. Revisit if review
+  finds misread formulas.
+- **OMML → LaTeX** for native Office Math. It's flagged so the slide goes to an image, but not read.
+  Build it when a deck uses native equations.
+- **PDF and .docx inputs to `study.js`.** Lectures for this course arrive as .pptx.
+
+[mathtype_to_mathml]: https://github.com/jure/mathtype_to_mathml

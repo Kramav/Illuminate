@@ -114,6 +114,56 @@ progress lines count those requests, not your sections.
 --help            --version
 ```
 
+## Study sheets
+
+Cards are for drilling. A whole course for an exam needs a review sheet as well, and `study.js` is
+the half of that pipeline that can be computed instead of judged:
+
+```sh
+node study.js build E:\Slides\*.pptx --out E:\Slides\illuminate-out   # extract + render each lecture
+node study.js status E:\Slides\illuminate-out                         # what is done, what is stale
+```
+
+Each lecture gets a folder: `slides.md` (every slide's text, numbered `s1`, `s2`… the way a citation
+writes it, with the reason a slide needs looking at), and `images/` with every slide rendered, plus
+a **separate high-resolution crop of each equation**. Notes are then written per lecture against
+[TEMPLATE.md](TEMPLATE.md), by a model or by hand. The tool doesn't write them; it checks them:
+
+```sh
+node study.js stamp    <out> 5         # the first line notes.md must carry
+node study.js coverage <out> 5         # every slide cited or listed as skipped, every citation real
+node study.js review   <out> 5         # review.html: each note beside the slide it cites
+node study.js index    <out>           # terms defined in more than one lecture, for the merge
+node study.js coverage <out> --sheet   # nothing the notes cited was merged away
+```
+
+The `--out` folder holds course material. Keep it outside the repository; `.gitignore` also
+excludes `out/`, `*.pptx`, `*.pdf` and `*.png`.
+
+**Resuming.** Every stage records what it was built from, and a stage whose inputs haven't changed is
+skipped. That covers the deck's SHA-256, the extractor and renderer versions, and the template
+version stamped into each `notes.md`. Change one deck and only that lecture is redone, and its notes
+are reported stale. `--force` redoes everything named.
+
+**What the reader recovers that it used to drop.** These were all found in real lecture decks:
+
+- **Slide order** comes from `presentation.xml`, not file names.
+- **Hidden slides** are kept and marked, and they're rendered too, so image N is slide N.
+- **Symbol-font Greek** (`U+F062` is β) is decoded through the font's own encoding. This also
+  improves flashcard text.
+- **Superscript and subscript runs** are written as `w_{ij}`, in study output only.
+- **Equation objects** (Equation Editor 3.0, MathType) are counted and cropped. PowerPoint's fallback
+  copy of each object is ignored, so equations aren't counted twice and text isn't read twice.
+
+**Rendering needs LibreOffice** (a portable folder is fine). It's found from `--soffice`, then
+`ILLUMINATE_SOFFICE`, then `PATH` and the usual install locations. LibreOffice's default PDF export
+leaves hidden slides out; we turn that off, and refuse to render if the page count doesn't match the
+slide count. `--no-render` gives text only.
+
+Known limit: LibreOffice lays out text that PowerPoint shrinks to fit slightly differently, so an
+overfull text box can overlap a neighbour in the image. The extracted text in `slides.md` is
+unaffected, and it's always read alongside the image.
+
 ## Working on it
 
 `npm test` — `node --test`, no framework. The suite writes real ZIP bytes and reads them back
@@ -125,6 +175,9 @@ Two tests feed our output through QuickMathPlus's actual `parseSet`, when that r
 out beside this one; both skip themselves when it isn't. That parser rejects rather than repairs, so
 a duplicate question or a stray `;` fails the whole import — which is what those tests are guarding.
 CI checks QuickMathPlus out so they run there even when they'd skip locally.
+
+The study-sheet render test drives LibreOffice and skips itself unless `ILLUMINATE_SOFFICE` points
+at `soffice` (`soffice.com` on Windows). CI installs LibreOffice on one leg so the test runs there.
 
 Running `npm install` under npm 11 rewrites `package-lock.json` slightly — it drops `libc` fields an
 older npm wrote. That diff is the npm version, not a dependency change.

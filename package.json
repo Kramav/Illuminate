@@ -2,10 +2,11 @@
   "name": "illuminate",
   "version": "0.1.0",
   "private": true,
-  "description": "Turn slides, docs, and PDFs into study sets",
+  "description": "Turn slides, docs, and PDFs into study sets and study sheets",
   "type": "module",
   "bin": {
-    "illuminate": "./illuminate.js"
+    "illuminate": "./illuminate.js",
+    "study": "./study.js"
   },
   "scripts": {
     "test": "node --test",
@@ -15,6 +16,7 @@
     "node": ">=20"
   },
   "dependencies": {
+    "@napi-rs/canvas": "1.0.10",
     "pdfjs-dist": "^6.2.108"
   }
 }

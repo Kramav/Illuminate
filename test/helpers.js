@@ -90,3 +90,39 @@ export const wpara = (runs, style = '') =>
 
 export const documentXml = (paragraphs) => `<?xml version="1.0"?>
 <w:document xmlns:w="w"><w:body>${paragraphs.join('')}</w:body></w:document>`;
+
+/**
+ * A deck shaped like the 2026 lectures: slide parts numbered out of presentation order, a hidden
+ * slide, an Equation Editor object stored PowerPoint's way (real object plus picture fallback), and
+ * text typed with Symbol-font Greek and subscript runs.
+ */
+export function lectureDeck() {
+  const run = (text) => `<a:r><a:rPr lang="en-US"/><a:t>${text}</a:t></a:r>`;
+  const symRun = (text) => `<a:r><a:rPr lang="en-US"><a:sym typeface="Symbol"/></a:rPr><a:t>${text}</a:t></a:r>`;
+  const body = (paras) => `<p:sp><p:nvSpPr><p:nvPr><p:ph type="body" idx="1"/></p:nvPr></p:nvSpPr><p:txBody>${paras}</p:txBody></p:sp>`;
+  const title = (text) => `<p:sp><p:nvSpPr><p:nvPr><p:ph type="title"/></p:nvPr></p:nvSpPr><p:txBody>${para([[text, false]])}</p:txBody></p:sp>`;
+  const sld = (inner, attrs = '') => `<?xml version="1.0"?><p:sld xmlns:p="p" xmlns:a="a"${attrs}><p:cSld><p:spTree>${inner}</p:spTree></p:cSld></p:sld>`;
+  const equation = `<mc:AlternateContent xmlns:mc="mc"><mc:Choice Requires="v"><p:graphicFrame>
+      <p:xfrm><a:off x="914400" y="685800"/><a:ext cx="1828800" cy="342900"/></p:xfrm>
+      <a:graphic><a:graphicData><p:oleObj progId="Equation.3" r:id="rId9"><p:embed/></p:oleObj></a:graphicData></a:graphic>
+    </p:graphicFrame></mc:Choice><mc:Fallback><p:graphicFrame><p:pic><p:blipFill/></p:pic></p:graphicFrame>
+    ${body(para([['FALLBACK COPY', false]]))}</mc:Fallback></mc:AlternateContent>`;
+
+  return makeZip({
+    'ppt/presentation.xml': '<p:presentation xmlns:p="p" xmlns:r="r"><p:sldIdLst>'
+      + '<p:sldId id="256" r:id="rId3"/><p:sldId id="257" r:id="rId2"/><p:sldId id="258" r:id="rId4"/>'
+      + '</p:sldIdLst><p:sldSz cx="9144000" cy="6858000"/></p:presentation>',
+    'ppt/_rels/presentation.xml.rels': '<Relationships>'
+      + '<Relationship Id="rId2" Target="slides/slide1.xml"/>'
+      + '<Relationship Id="rId3" Target="slides/slide2.xml"/>'
+      + '<Relationship Id="rId4" Target="/ppt/slides/slide3.xml"/></Relationships>',
+    // Shown first, though its part is slide2.xml.
+    'ppt/slides/slide2.xml': sld(title('Gradient Descent')
+      + body(`<a:p>${run('the learning rate ')}${symRun('\uF068')}</a:p>`
+        + `<a:p>${run('w')}<a:r><a:rPr lang="en-US" baseline="-25000"/><a:t>i</a:t></a:r>`
+        + `<a:r><a:rPr lang="en-US" baseline="-25000"/><a:t>j</a:t></a:r>${run(' is a weight')}</a:p>`)
+      + equation),
+    'ppt/slides/slide1.xml': sld(title('Backup material') + body(para([['not shown in class', false]])), ' show="0"'),
+    'ppt/slides/slide3.xml': sld(title('Summary') + body(para([['Descent follows the negative gradient', false]]))),
+  });
+}

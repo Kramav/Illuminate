@@ -7,7 +7,7 @@ import { openZip } from '../src/zip.js';
 import { readPptx } from '../src/pptx.js';
 import { readDocx } from '../src/docx.js';
 import { buildDoc } from '../src/doc.js';
-import { makeZip, para, slideXml, wpara, documentXml } from './helpers.js';
+import { makeZip, para, slideXml, wpara, documentXml, lectureDeck } from './helpers.js';
 
 test('zip: reads stored and deflated entries alike', () => {
   const long = 'the mitochondrion is the powerhouse of the cell. '.repeat(40);
@@ -210,4 +210,64 @@ test('docx: a tab typed inside a cell is not a second column break', () => {
   }));
   // The cell wall is the boundary; a tab within a cell is the author's spacing, not their structure.
   assert.equal(section.lines[0].text, 'Osmosis\twater movement');
+});
+
+/* -------------------------------------------------------------------------- */
+/* What the study-sheet pipeline needs from a deck                            */
+/* -------------------------------------------------------------------------- */
+
+test('pptx: slides come in presentation order, not part-name order', () => {
+  const sections = readPptx(lectureDeck());
+  assert.deepEqual(sections.map((s) => s.title), ['Gradient Descent', 'Backup material', 'Summary']);
+  assert.deepEqual(sections.map((s) => s.number), [1, 2, 3]);
+  assert.deepEqual(sections.map((s) => s.ref), ['slide-1', 'slide-2', 'slide-3']);
+});
+
+test('pptx: a hidden slide is kept and marked, so numbering matches PowerPoint', () => {
+  const sections = readPptx(lectureDeck());
+  assert.deepEqual(sections.map((s) => s.hidden), [false, true, false]);
+});
+
+test('pptx: an embedded equation is counted once, with its box, and its fallback is not read', () => {
+  const [first] = readPptx(lectureDeck());
+  assert.equal(first.visuals.equations.length, 1);
+  assert.equal(first.visuals.equations[0].kind, 'Equation.3');
+  assert.deepEqual(first.visuals.equations[0].box, { x: 0.1, y: 0.1, w: 0.2, h: 0.05 });
+  assert.equal(first.visuals.pictures, 0, 'the fallback picture of the equation is not a picture');
+  assert.ok(!first.lines.some((l) => l.text.includes('FALLBACK')), 'fallback text was read as content');
+});
+
+test('pptx: Symbol-font characters arrive as the characters they draw', () => {
+  const [first] = readPptx(lectureDeck());
+  assert.ok(first.lines.some((l) => l.text === 'the learning rate η'), first.lines.map((l) => l.text).join(' / '));
+});
+
+test('pptx: subscript runs are marked, and flashcard text is left plain', () => {
+  const [first] = readPptx(lectureDeck());
+  const line = first.lines.find((l) => l.text.startsWith('wij'));
+  assert.ok(line, 'plain text keeps the characters in order');
+  assert.deepEqual(line.runs.filter((r) => r.script).map((r) => [r.text, r.script]), [['i', 'sub'], ['j', 'sub']]);
+});
+
+test('pptx: a deck without presentation.xml still falls back to numeric part order', () => {
+  const sections = readPptx(pptx());
+  assert.deepEqual(sections.map((s) => s.title), ['Cell Biology', 'Respiration', 'Summary']);
+  assert.ok(sections.every((s) => s.hidden === false && s.visuals.equations.length === 0));
+});
+
+
+test('pptx: a diagram drawn from loose strokes and labels is noticed, a text slide is not', () => {
+  const stroke = (geom) => `<p:sp><p:spPr>${geom}</p:spPr></p:sp>`;
+  const label = (text) => `<p:sp><p:txBody>${para([[text, false]])}</p:txBody></p:sp>`;
+  const deck = makeZip({
+    'ppt/slides/slide1.xml': slideXml('Bias and variance', [para([['Fitting training data too well is a liability', false]])])
+      .replace('</p:spTree>', `${stroke('<a:custGeom/>')}${stroke('<a:prstGeom prst="line"/>')}`
+        + `${['X', 'X', 'O', 'O', 'X'].map(label).join('')}</p:spTree>`),
+    'ppt/slides/slide2.xml': slideXml('Assessing quality', [para([['Generalization is checked by validation', false]])])
+      .replace('</p:spTree>', `${stroke('<a:prstGeom prst="rect"/>')}</p:spTree>`),
+  });
+  const [drawing, text] = readPptx(deck);
+  assert.equal(drawing.visuals.drawn, 2);
+  assert.equal(drawing.visuals.labels, 5);
+  assert.equal(text.visuals.drawn, 0, 'a plain rectangle is a background, not a stroke');
 });

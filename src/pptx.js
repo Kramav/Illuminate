@@ -13,6 +13,7 @@
 
 import { openZip } from './zip.js';
 import { decode, elements, tableRows } from './xml.js';
+import { decodeSymbol } from './symbol.js';
 
 const SLIDE_PATH = /^ppt\/slides\/slide(\d+)\.xml$/;
 
@@ -45,10 +46,17 @@ function linesOf(xml) {
       // Only `<a:r>` runs are collected, which quietly excludes `<a:fld>` — the element holding
       // auto-updating slide numbers and dates. Those carry an `<a:t>` too and would otherwise
       // arrive as a line of body text on every single slide.
-      const text = elements(run, 'a:t').map(decode).join('');
+      const text = decodeSymbol(elements(run, 'a:t').map(decode).join(''), {
+        sym: /<a:sym\b[^>]*\btypeface="Symbol"/.test(run),
+        latin: /<a:latin\b[^>]*\btypeface="Symbol"/.test(run),
+      });
       if (!text) continue;
       const bold = /<a:rPr[^>]*\bb="(?:1|true)"/.test(run);
-      runs.push({ text, bold });
+      // Superscript and subscript are a baseline shift on an ordinary run, which is how a lecture
+      // types w_ij or x^k outside an equation object. Flattened, "x^k" reads as "xk" — so the shift
+      // is kept on the run for readers that can say it, and the text itself is left alone.
+      const baseline = Number(/<a:rPr[^>]*\bbaseline="(-?\d+)"/.exec(run)?.[1] ?? 0);
+      runs.push(baseline ? { text, bold, script: baseline > 0 ? 'sup' : 'sub' } : { text, bold });
     }
     if (runs.length) out.push({ text: runs.map((r) => r.text).join(''), runs, level });
   }
@@ -89,6 +97,129 @@ function notesPathFor(zip, slideName) {
   return `ppt/${target.replace(/^\.\.\//, '')}`;
 }
 
+/**
+ * The slides in the order the presentation shows them.
+ *
+ * File names are not that order. `slideN.xml` is a part name, and the deck's actual sequence is the
+ * `sldIdLst` in presentation.xml — a slide moved in PowerPoint can keep its old file name, and every
+ * citation after it would then point one slide off. The numeric file-name sort survives only as the
+ * fallback for an archive without a presentation part, which real decks always have.
+ */
+function slideOrder(zip) {
+  const byName = zip.names()
+    .filter((n) => SLIDE_PATH.test(n))
+    // Numeric sort: string order would put slide10 immediately after slide1.
+    .sort((a, b) => Number(SLIDE_PATH.exec(a)[1]) - Number(SLIDE_PATH.exec(b)[1]));
+
+  if (!zip.has('ppt/presentation.xml') || !zip.has('ppt/_rels/presentation.xml.rels')) return byName;
+  const pres = zip.read('ppt/presentation.xml').toString('utf8');
+  const rels = zip.read('ppt/_rels/presentation.xml.rels').toString('utf8');
+  const target = new Map();
+  for (const [rel] of rels.matchAll(/<Relationship\b[^>]*>/g)) {
+    const id = /\bId="([^"]+)"/.exec(rel)?.[1];
+    const to = /\bTarget="([^"]+)"/.exec(rel)?.[1];
+    // Relative to ppt/ ("slides/slide1.xml"), or absolute ("/ppt/slides/slide1.xml").
+    if (id && to) target.set(id, to.startsWith('/') ? to.slice(1) : `ppt/${to}`);
+  }
+  const ordered = [...pres.matchAll(/<p:sldId\b[^>]*\br:id="([^"]+)"/g)]
+    .map((m) => target.get(m[1]))
+    .filter((name) => name && zip.has(name));
+  return ordered.length ? ordered : byName;
+}
+
+/** Slide dimensions in EMU, so a shape's position can be stated as a fraction of the slide. */
+function slideSize(zip) {
+  const pres = zip.has('ppt/presentation.xml') ? zip.read('ppt/presentation.xml').toString('utf8') : '';
+  const m = /<p:sldSz\b[^>]*\bcx="(\d+)"[^>]*\bcy="(\d+)"/.exec(pres);
+  // 4:3 at PowerPoint's default size, which is what a deck without the element was drawn on.
+  return m ? { cx: Number(m[1]), cy: Number(m[2]) } : { cx: 9144000, cy: 6858000 };
+}
+
+/**
+ * Drop the fallback half of every `mc:AlternateContent`.
+ *
+ * PowerPoint writes anything a reader might not understand twice — once as the real object
+ * (`mc:Choice`), once as a picture of it (`mc:Fallback`). Read both and every equation counts as an
+ * equation *and* a picture, and a text box saved this way has its text read twice. The choice is the
+ * truth; the fallback is a rendering of it.
+ *
+ * ponytail: non-greedy, so a fallback nested inside a fallback would close early. PowerPoint writes
+ * AlternateContent one level deep; a nested one would leave a stray fragment, not lose content.
+ */
+const withoutFallbacks = (xml) => xml.replace(/<mc:Fallback\b[^>]*>[\s\S]*?<\/mc:Fallback>/g, '');
+
+/** A frame's box as fractions of the slide — what a renderer needs to crop it from a page image. */
+function boxOf(xml, size) {
+  const off = /<a:off\b[^>]*\bx="(-?\d+)"[^>]*\by="(-?\d+)"/.exec(xml);
+  const ext = /<a:ext\b[^>]*\bcx="(\d+)"[^>]*\bcy="(\d+)"/.exec(xml);
+  if (!off || !ext) return null;
+  const r = (n) => Math.round(n * 10000) / 10000;
+  return {
+    x: r(Number(off[1]) / size.cx),
+    y: r(Number(off[2]) / size.cy),
+    w: r(Number(ext[1]) / size.cx),
+    h: r(Number(ext[2]) / size.cy),
+  };
+}
+
+/**
+ * What on a slide the text reader cannot see.
+ *
+ * Everything counted here either has no text at all (a picture, an embedded equation) or has text
+ * whose meaning is in its arrangement (a chart, a diagram drawn from grouped shapes and connectors).
+ * The counts are what lets a later stage send only the slides that need looking at as images — and,
+ * more importantly, say so, rather than presenting a slide's text as all there was.
+ *
+ * Embedded equations are listed one by one with their boxes. In older decks they are Equation
+ * Editor 3.0 or MathType OLE objects, which carry no text a reader can use — only a picture — so the
+ * box is what lets each one be cropped from the rendered slide and read on its own.
+ */
+function visualsOf(xml, size) {
+  const frames = xml.split(/<p:graphicFrame[\s>]/).slice(1).map((chunk) => {
+    const end = chunk.indexOf('</p:graphicFrame>');
+    return end < 0 ? chunk : chunk.slice(0, end);
+  });
+  const equations = [];
+  let objects = 0;
+  let charts = 0;
+  let smartart = 0;
+  for (const frame of frames) {
+    const progId = /<p:oleObj\b[^>]*\bprogId="([^"]+)"/.exec(frame)?.[1];
+    if (progId && /^Equation\./i.test(progId)) equations.push({ kind: progId, box: boxOf(frame, size) });
+    else if (/<p:oleObj\b/.test(frame)) objects++;
+    if (/drawingml\/2006\/chart"/.test(frame)) charts++;
+    if (/drawingml\/2006\/diagram"/.test(frame)) smartart++;
+  }
+  // A diagram drawn shape by shape — a freehand class boundary, an arrow, a brace — is ungrouped and
+  // has no connectors, so neither count above sees it. Two other things give it away: shapes with a
+  // geometry but no text (the strokes), and a crowd of one- to three-character text boxes (the
+  // points of a scatter plot, the labels on axes). A text slide has neither.
+  const shapes = shapesOf(xml);
+  const textOf = (shape) => elements(shape, 'a:t').map(decode).join('').trim();
+  const drawn = shapes.filter((shape) => !textOf(shape)
+    && (/<a:custGeom[\s>/]/.test(shape) || /<a:prstGeom\b[^>]*\bprst="(?!rect")/.test(shape))).length;
+  const labels = shapes.filter((shape) => {
+    const text = textOf(shape);
+    return text && text.length <= 3;
+  }).length;
+  return {
+    drawn,
+    labels,
+    pictures: (xml.match(/<p:pic[\s>]/g) ?? []).length,
+    charts,
+    smartart,
+    equations,
+    // ponytail: native Office Math is counted, not read — `linesOf` takes `<a:r>` runs and an
+    // equation's runs are `<m:r>`, so its text is absent from the lines. Counting it routes the slide
+    // to an image instead of letting the gap pass silently. An OMML → LaTeX reader is the upgrade,
+    // worth building when a deck that uses native equations arrives (the 2026 decks use none).
+    math: (xml.match(/<a14:m[\s>]/g) ?? []).length,
+    objects,
+    groups: (xml.match(/<p:grpSp[\s>]/g) ?? []).length,
+    connectors: (xml.match(/<p:cxnSp[\s>]/g) ?? []).length,
+  };
+}
+
 function notesText(zip, path) {
   if (!path || !zip.has(path)) return '';
   const xml = zip.read(path).toString('utf8');
@@ -100,35 +231,40 @@ function notesText(zip, path) {
 }
 
 /**
- * Read a deck into sections, one per slide, in slide order.
+ * Read a deck into sections, one per slide, in the order the presentation shows them.
+ *
+ * `ref` and `number` are the slide's position in that order — the number PowerPoint displays — so a
+ * citation of `slide-7` is the seventh slide a student pages to, hidden slides included. `hidden`
+ * and `visuals` are extra: the card rules ignore them, the study-sheet pipeline depends on them.
  *
  * @param {Buffer} buf
- * @returns {Array<{ title: string, ref: string, lines: Array, notes: string }>}
+ * @returns {Array<{ title: string, ref: string, number: number, hidden: boolean, lines: Array,
+ *   notes: string, visuals: object }>}
  */
 export function readPptx(buf) {
   const zip = openZip(buf);
-  const slides = zip.names()
-    .filter((n) => SLIDE_PATH.test(n))
-    // Numeric sort: string order would put slide10 immediately after slide1, and every section
-    // reference in the finished deck would name the wrong slide.
-    .sort((a, b) => Number(SLIDE_PATH.exec(a)[1]) - Number(SLIDE_PATH.exec(b)[1]));
-
+  const slides = slideOrder(zip);
   if (!slides.length) throw new Error('no slides found — is this really a .pptx?');
+  const size = slideSize(zip);
 
   return slides.map((name, i) => {
-    const xml = zip.read(name).toString('utf8');
+    const raw = zip.read(name).toString('utf8');
+    const xml = withoutFallbacks(raw);
     const shapes = shapesOf(xml).filter((shape) => !CHROME_PH.test(shape));
     const titleShape = shapes.find((shape) => TITLE_PH.test(shape));
     const body = shapes.filter((shape) => shape !== titleShape);
     return {
       title: titleShape ? linesOf(titleShape).map((l) => l.text).join(' ').trim() : '',
       ref: `slide-${i + 1}`,
+      number: i + 1,
+      hidden: /<p:sld\b[^>]*\bshow="(?:0|false)"/.test(raw),
       // Tables come after the shapes rather than in their position on the slide: they live outside
       // the `<p:sp>` sequence entirely, so there is no shared order to interleave them into without
       // walking the tree. Within a section the order only affects which line answers a question
       // line, and a table row carries its own answer.
       lines: [...body.flatMap(linesOf), ...tableLines(xml)],
       notes: notesText(zip, notesPathFor(zip, name)),
+      visuals: visualsOf(xml, size),
     };
   });
 }

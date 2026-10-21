@@ -3,3 +3,8 @@ node_modules/
 *.tsv
 !README*
 tmp-*
+# Course material and everything derived from it — never committed.
+out/
+*.pptx
+*.pdf
+*.png

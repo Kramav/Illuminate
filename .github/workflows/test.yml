@@ -53,5 +53,15 @@ jobs:
             echo "::warning::QuickMathPlus not checked out; the import contract test will skip"
           fi
 
+      # The study-sheet render test drives LibreOffice and skips itself without it — the same trap as
+      # the QuickMathPlus contract test above. One leg is enough to keep it honest; installing it on
+      # all three would triple the slowest step for the same assertion.
+      - name: Install LibreOffice for the render test
+        if: matrix.node == '22'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends libreoffice-impress
+          echo "ILLUMINATE_SOFFICE=$(command -v soffice)" >> "$GITHUB_ENV"
+
       - run: npm test
         working-directory: illuminate
