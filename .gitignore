@@ -8,3 +8,5 @@ out/
 *.pptx
 *.pdf
 *.png
+src-tauri/target/
+src-tauri/gen/

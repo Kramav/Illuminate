@@ -114,6 +114,18 @@ progress lines count those requests, not your sections.
 --help            --version
 ```
 
+## Optional GUI
+
+```sh
+npm run app          # builds and opens the window (needs Rust, and WebView2 — already on Windows 10/11)
+```
+
+A small native window ([src-tauri/](src-tauri/), Tauri 2): **Choose files…** and **Save deck as…**
+open the normal Windows file dialogs, so no path is ever typed. **Convert** runs
+`node illuminate.js` on the picks, so the rules, merging and output are the command line's, not a
+second copy. Nothing else depends on it — without Rust installed, the CLI is unaffected.
+Defaults only: `--llm`, `--residue`, `--format` and study sheets stay on the command line.
+
 ## Study sheets
 
 Cards are for drilling. A whole course for an exam needs a review sheet as well, and `study.js` is

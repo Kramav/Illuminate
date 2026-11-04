@@ -1,0 +1,41 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Illuminate</title>
+<style>
+  body { font: 15px system-ui; margin: 1.5rem; }
+  button { font: inherit; padding: .4rem .9rem; margin: .3rem .3rem .3rem 0; }
+  ul { padding-left: 1.2rem; } #msg { white-space: pre-wrap; margin-top: 1rem; }
+  .err { color: #c00; }
+</style>
+<h2>Illuminate</h2>
+<button id="pick">1. Choose files…</button>
+<ul id="files"></ul>
+<button id="save" disabled>2. Save deck as…</button> <span id="out"></span><br>
+<button id="go" disabled>3. Convert</button>
+<div id="msg"></div>
+<script>
+  const { invoke } = window.__TAURI__.core;
+  const $ = (id) => document.getElementById(id);
+  const name = (p) => p.split(/[\/]/).pop();
+  let files = [], out = null;
+  const refresh = () => { $('save').disabled = !files.length; $('go').disabled = !(files.length && out); };
+
+  $('pick').onclick = async () => {
+    const picked = await invoke('pick_files');
+    if (!picked.length) return;
+    files = picked; out = null;
+    $('files').replaceChildren(...files.map((f) => Object.assign(document.createElement('li'), { textContent: name(f) })));
+    $('out').textContent = ''; $('msg').textContent = '';
+    refresh();
+  };
+  $('save').onclick = async () => {
+    out = await invoke('pick_output', { firstInput: files[0] });
+    $('out').textContent = out ? name(out) : '';
+    refresh();
+  };
+  $('go').onclick = async () => {
+    $('msg').className = ''; $('msg').textContent = 'Working…';
+    try { $('msg').textContent = await invoke('convert', { files, out }); }
+    catch (e) { $('msg').className = 'err'; $('msg').textContent = e; }
+  };
+</script>

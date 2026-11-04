@@ -521,3 +521,35 @@ to 1.0.10. 1.0.12 was hours old when this was written.
 - **PDF and .docx inputs to `study.js`.** Lectures for this course arrive as .pptx.
 
 [mathtype_to_mathml]: https://github.com/jure/mathtype_to_mathml
+
+---
+
+# Round five — an optional GUI
+
+[src-tauri/](src-tauri/) — a Tauri 2 window with two native Windows file dialogs (pick inputs, pick
+output) and a Convert button. The Rust side is dialogs plus spawning `node illuminate.js`, so the
+CLI stays the single implementation. Optional: no change to the Node project or its dependencies;
+`npm run app` to start it. A first browser-served attempt was dropped for this.
+
+**Verified:** `cargo check` is clean. **Not verified:** the window itself, the dialogs and the
+Convert click — I can't look at a GUI, so someone needs to run `npm run app` once and report back.
+No automated test covers the Rust side.
+
+**Status:** 119 Node tests passing, 1 skipped (LibreOffice render). Items 1–10 shipped; **11 is still
+open** (`max_tokens` shared with thinking on Opus 5 — needs live API calls to confirm).
+
+## Next
+
+1. **Run the app once and report what's wrong.** The only check the GUI has had is the compiler.
+2. **Confirm and fix #11.** The only open finding, and it fails expensively: two billed requests, no
+   cards, wrong error.
+3. **GUI: format and `--llm` options.** Passed straight through as CLI flags. Until then the GUI is a
+   strict subset of the CLI.
+4. **GUI: study sheets.** `study.js build/coverage/review` behind a folder picker; long renders need
+   progress reporting, which one `invoke` doesn't give.
+5. **Bundling.** The app finds `illuminate.js` through its source path, so it only runs from a clone.
+   An installer needs Node as a sidecar.
+6. **OMML → LaTeX**, only if a deck turns up using native equations.
+
+Not doing, unchanged: npm publishing, contributor docs, OCR, PDF bold detection, zip64, new input
+formats. Added: **a second implementation of the rules for the GUI** — it shells out to the CLI.

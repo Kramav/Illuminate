@@ -10,7 +10,8 @@
   },
   "scripts": {
     "test": "node --test",
-    "start": "node illuminate.js"
+    "start": "node illuminate.js",
+    "app": "cargo run --manifest-path src-tauri/Cargo.toml"
   },
   "engines": {
     "node": ">=20"
