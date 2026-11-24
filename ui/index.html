@@ -66,7 +66,7 @@
     font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 3px 6px; border-radius: 5px;
     color: #fff; min-width: 40px; text-align: center;
   }
-  .badge.pptx { background: #c2410c; } .badge.docx { background: #1d4ed8; } .badge.pdf { background: #b91c1c; }
+  .badge.pptx { background: #c2410c; } .badge.docx { background: #1d4ed8; } .badge.pdf { background: #b91c1c; } .badge.html, .badge.htm { background: #0f766e; }
   .fname { min-width: 0; }
   .fname div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .fname .dir { color: var(--muted); font-size: 12px; }
@@ -172,7 +172,7 @@
       <h2 id="filesHead"><span>Files</span><span id="count"></span></h2>
       <button class="drop" id="drop" type="button">
         <strong>Drop files here, or <span class="link">browse</span></strong>
-        <small>PowerPoint (.pptx), Word (.docx) and PDF</small>
+        <small>PowerPoint (.pptx), Word (.docx), PDF and web pages (.html)</small>
       </button>
       <ul class="files" id="files"></ul>
       <p class="note warn" id="rejected" hidden></p>
@@ -257,7 +257,7 @@
     return el;
   }
 
-  const KNOWN = ['pptx', 'docx', 'pdf'];
+  const KNOWN = ['pptx', 'docx', 'pdf', 'html', 'htm'];
   const EXT = { anki: '.txt', quizlet: '.tsv', json: '.json' };
   const GROUPS = ['A', 'B', 'C', 'D'];
   const sep = (p) => (p.includes('\\') ? '\\' : '/');
@@ -299,7 +299,7 @@
     }
     $('rejected').hidden = !bad.length;
     $('rejected').textContent = bad.length
-      ? `Skipped ${bad.map(base).join(', ')} — only .pptx, .docx and .pdf can be read.` : '';
+      ? `Skipped ${bad.map(base).join(', ')} — only .pptx, .docx, .pdf and .html can be read.` : '';
     clearResults();
     render();
   }

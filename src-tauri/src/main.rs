@@ -24,7 +24,7 @@ fn node(args: &[String]) -> Result<std::process::Output, String> {
 async fn pick_files(app: tauri::AppHandle) -> Vec<String> {
     app.dialog()
         .file()
-        .add_filter("Slides, documents, PDFs", &["pptx", "docx", "pdf"])
+        .add_filter("Slides, documents, PDFs, web pages", &["pptx", "docx", "pdf", "html", "htm"])
         .blocking_pick_files()
         .unwrap_or_default()
         .into_iter()

@@ -128,13 +128,13 @@ function chunk(residue) {
 }
 
 /**
- * Get JSON out of whatever the model actually said.
+ * Get JSON out of whatever the model actually said, and the array it was asked for under `key`.
  *
  * Local models in particular like to introduce themselves before answering, or wrap the answer in a
  * fenced code block, no matter how the request was phrased. Slicing between the outermost braces
  * recovers the object from both without caring which happened.
  */
-export function parseCards(text) {
+export function parseJson(text, key) {
   if (!text) return null;
   const body = String(text).replace(/^[\s\S]*?```(?:json)?/i, '').replace(/```[\s\S]*$/, '');
   const source = body.includes('{') ? body : String(text);
@@ -143,20 +143,22 @@ export function parseCards(text) {
   if (start < 0 || end <= start) return null;
   try {
     const parsed = JSON.parse(source.slice(start, end + 1));
-    return Array.isArray(parsed?.cards) ? parsed.cards : null;
+    return Array.isArray(parsed?.[key]) ? parsed[key] : null;
   } catch {
     return null;
   }
 }
 
-async function askLocal(provider, model, prompt, signal) {
+export const parseCards = (text) => parseJson(text, 'cards');
+
+async function askLocal(provider, model, system, prompt, signal) {
   const { base, label } = LOCAL[provider];
   const res = await fetch(`${base}/chat/completions`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       model,
-      messages: [{ role: 'system', content: SYSTEM }, { role: 'user', content: prompt }],
+      messages: [{ role: 'system', content: system }, { role: 'user', content: prompt }],
       temperature: 0,
       stream: false,
       response_format: { type: 'json_object' },
@@ -173,7 +175,7 @@ async function claudeClient() {
   try {
     ({ default: Anthropic } = await import('@anthropic-ai/sdk'));
   } catch {
-    throw new Error('--llm claude needs the Anthropic SDK: npm install @anthropic-ai/sdk');
+    throw new Error('the claude provider needs the Anthropic SDK: npm install @anthropic-ai/sdk');
   }
   return new Anthropic();
 }
@@ -196,15 +198,15 @@ export async function newestClaude(client) {
   }
 }
 
-async function askClaude(client, model, prompt) {
+async function askClaude(client, model, system, schema, prompt) {
   const message = await client.messages.create({
     model,
     max_tokens: CLAUDE_MAX_TOKENS,
-    system: SYSTEM,
+    system,
     messages: [{ role: 'user', content: prompt }],
     // A schema rather than a plea in the prompt: this is a mechanical extraction, so constrain the
     // shape and spend the effort budget on reading the passage instead of on formatting.
-    output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
+    output_config: { effort: 'low', format: { type: 'json_schema', schema } },
   });
   if (message.stop_reason === 'refusal') throw new Error('Claude declined this passage');
   // Thrown, not returned as null: a truncated reply would otherwise be retried, and re-sending the
@@ -215,12 +217,23 @@ async function askClaude(client, model, prompt) {
   return message.content.find((block) => block.type === 'text')?.text ?? '';
 }
 
+/**
+ * One request to any provider, returning the reply as text.
+ *
+ * Exported so the review pass in verify.js asks its own question through exactly this plumbing — the
+ * same ports, the same SDK import, the same refusal and truncation handling — rather than a second
+ * copy of it. `schema` constrains Claude's reply; local servers only get the shape the prompt
+ * describes. `client` reuses one SDK client across a run (and stands in for it in tests).
+ */
+export async function ask({ provider, model, system, schema, prompt, signal, client }) {
+  return provider === 'claude'
+    ? askClaude(client ?? await claudeClient(), model, system, schema, prompt)
+    : askLocal(provider, model, system, prompt, signal);
+}
+
 /** One request, with a single retry — a local model that rambles once will often comply when told. */
 async function askOnce(provider, model, prompt, signal, client) {
-  const reply = provider === 'claude'
-    ? await askClaude(client, model, prompt)
-    : await askLocal(provider, model, prompt, signal);
-  return parseCards(reply);
+  return parseCards(await ask({ provider, model, system: SYSTEM, schema: SCHEMA, prompt, signal, client }));
 }
 
 /**
@@ -243,7 +256,7 @@ export async function expand(residue, { provider, model, refs, onProgress = () =
   const chunks = chunk(residue);
   if (!chunks.length) return [];
   if (provider === 'claude') client ??= await claudeClient();
-  const chosen = model ?? (provider === 'claude' ? await newestClaude(client) : await defaultModel(provider));
+  const chosen = model ?? await defaultModel(provider, client);
   if (provider === 'claude' && !model) onProgress(`claude: using ${chosen}`);
   const out = [];
 
@@ -276,8 +289,12 @@ export async function expand(residue, { provider, model, refs, onProgress = () =
   return out;
 }
 
-/** Whatever the local server already has loaded, so `--llm ollama` works without also naming a model. */
-async function defaultModel(provider) {
+/**
+ * Whatever the local server already has loaded, so `--llm ollama` works without also naming a model;
+ * for Claude, the newest Opus the key can use.
+ */
+export async function defaultModel(provider, client) {
+  if (provider === 'claude') return newestClaude(client ?? await claudeClient());
   const found = (await probe(provider)).models?.[0];
   if (!found) throw new Error(`no model available from ${LOCAL[provider].label} — pull one first`);
   return found;
