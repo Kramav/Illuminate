@@ -161,3 +161,61 @@ test('a first reply that is prose costs exactly one retry, and the retry lands',
   assert.match(prompts[1], /JSON only/);
   assert.deepEqual(out.map((c) => c.front), ['Osmosis']);
 });
+
+/**
+ * Stand in for the Anthropic SDK client — the SDK is optional and not installed in CI, and a real
+ * call costs money. `models` is what the Models API lists; `replies` are `messages.create` results.
+ */
+function fakeClaude(models, replies) {
+  const sent = [];
+  return {
+    sent,
+    models: { list: async function* () { yield* models; } },
+    messages: {
+      create: async (body) => {
+        sent.push(body);
+        return replies[Math.min(sent.length - 1, replies.length - 1)];
+      },
+    },
+  };
+}
+
+const claudeReply = (stop_reason, text) => ({ stop_reason, content: [{ type: 'text', text }] });
+
+test('a reply cut off at max_tokens costs one request, says so, and is not retried', async () => {
+  // #11: on Opus 5+ thinking shares max_tokens with the answer. A truncated reply is invalid JSON,
+  // and the old code read that as "rambled" and re-sent the identical prompt into the same cap.
+  const client = fakeClaude([], [claudeReply('max_tokens', '{"cards":[{"ref":"slide-1","fro')]);
+  const messages = [];
+
+  const out = await ask([passage('slide-1', 'Cells', prose(4))],
+    { provider: 'claude', model: 'claude-opus-5-5', client, onProgress: (m) => messages.push(m) });
+
+  assert.deepEqual(out, []);
+  assert.equal(client.sent.length, 1, 'a length cap is not fixed by asking again');
+  assert.ok(messages.some((m) => /token cap/.test(m)), messages.join('\n'));
+  assert.ok(client.sent[0].max_tokens >= 16000, 'leaves thinking room beside the JSON');
+});
+
+test('without --model, the newest Opus listed is used; --model wins; a failed listing falls back', async () => {
+  const listed = [
+    { id: 'claude-opus-5-5', created_at: '2026-09-01T00:00:00Z' },
+    { id: 'claude-fable-5-2', created_at: '2026-11-01T00:00:00Z' }, // newer, but not an Opus
+    { id: 'claude-opus-6', created_at: '2026-10-15T00:00:00Z' },
+    { id: 'claude-opus-5', created_at: '2026-05-01T00:00:00Z' },
+  ];
+  const ok = claudeReply('end_turn', '{"cards":[]}');
+
+  const auto = fakeClaude(listed, [ok]);
+  await ask([passage('slide-1', '', prose(4))], { provider: 'claude', model: undefined, client: auto });
+  assert.equal(auto.sent[0].model, 'claude-opus-6');
+
+  const pinned = fakeClaude(listed, [ok]);
+  await ask([passage('slide-1', '', prose(4))], { provider: 'claude', model: 'claude-sonnet-5-5', client: pinned });
+  assert.equal(pinned.sent[0].model, 'claude-sonnet-5-5');
+
+  const broken = fakeClaude([], [ok]);
+  broken.models.list = () => { throw new Error('offline'); };
+  await ask([passage('slide-1', '', prose(4))], { provider: 'claude', model: undefined, client: broken });
+  assert.equal(broken.sent[0].model, 'claude-opus-5-5');
+});

@@ -8,7 +8,7 @@ The target is a **solid, trustworthy tool**: a repo you clone and rely on. Not a
 feature expansion. Publishing, `CONTRIBUTING.md`, OCR and new input formats are all deliberately out
 of scope, listed at the bottom so the decision is on the record rather than forgotten.
 
-**Ten items shipped**, one open ([11](#11-on-the-claude-path-max_tokens-is-now-shared-with-thinking)).
+**All eleven items shipped.**
 The suite went 46 → 68 → 80 → 85.
 
 - **Round one (1–5)** was the repo: a bug that silently broke the thing the project exists to do, no
@@ -17,7 +17,7 @@ The suite went 46 → 68 → 80 → 85.
   round one never tested. Two of the three were silent: content dropped with no card, no residue and
   no warning.
 - **Round three (9–11)** is the model pass, the one part of the pipeline neither earlier round looked
-  at. 9 and 10 are shipped; 11 is open, because confirming it costs real API calls.
+  at. All three are shipped.
 
 Started at 46 tests passing, which is worth saying plainly: **a green suite is what every round of
 findings has hidden behind.**
@@ -323,7 +323,7 @@ glossary does not use it, and the failure is missing rows rather than wrong ones
 
 # Round three — the model pass
 
-**9 and 10 shipped. [11](#11-on-the-claude-path-max_tokens-is-now-shared-with-thinking) is open.**
+**9, 10 and 11 shipped.**
 
 Round one was the repo, round two was the reading. Neither looked at [llm.js](src/llm.js), and the
 gap shows in the same shape as before: the suite has nine tests naming the model pass, and **not one
@@ -420,6 +420,12 @@ checking it costs real API calls, so it is worth confirming before changing anyt
 re-sending an identical prompt cannot fix a length cap. `effort: 'low'` is already right and should
 stay; disabling thinking outright is the wrong lever here, because on Opus 5 that risks `<thinking>`
 tags leaking into the visible text, which is precisely what `parseCards` then has to survive.
+
+**Shipped.** Fixed without the live confirmation, because the fix is safe either way: `max_tokens`
+is 16000, and `stop_reason === 'max_tokens'` now throws a message naming the cap, which skips the
+retry. Tested against a stubbed SDK client: one request, not two. The default model is no longer
+pinned either: without `--model`, the newest Opus the key can list is used (`newestClaude`), with
+`claude-opus-5-5` as the fallback.
 
 ## Order
 
@@ -531,25 +537,26 @@ output) and a Convert button. The Rust side is dialogs plus spawning `node illum
 CLI stays the single implementation. Optional: no change to the Node project or its dependencies;
 `npm run app` to start it. A first browser-served attempt was dropped for this.
 
+**Redesigned** (round five, second pass): drag and drop, format and AI-pass options with live
+provider status from `--check`, decks as one / one per file / chosen per file (groups A–D), a folder
+instead of a save path with a warning before any file is replaced, and per-deck results with card
+counts, notes, Open and Show in folder. Follows the system light/dark theme; accent #4F46E5. Still
+one CLI call per deck, so the rules have one implementation.
+
 **Verified:** `cargo check` is clean. **Not verified:** the window itself, the dialogs and the
 Convert click — I can't look at a GUI, so someone needs to run `npm run app` once and report back.
 No automated test covers the Rust side.
 
-**Status:** 119 Node tests passing, 1 skipped (LibreOffice render). Items 1–10 shipped; **11 is still
-open** (`max_tokens` shared with thinking on Opus 5 — needs live API calls to confirm).
+**Status:** 120 Node tests passing, 1 skipped (LibreOffice render). Items 1–11 shipped.
 
 ## Next
 
 1. **Run the app once and report what's wrong.** The only check the GUI has had is the compiler.
-2. **Confirm and fix #11.** The only open finding, and it fails expensively: two billed requests, no
-   cards, wrong error.
-3. **GUI: format and `--llm` options.** Passed straight through as CLI flags. Until then the GUI is a
-   strict subset of the CLI.
-4. **GUI: study sheets.** `study.js build/coverage/review` behind a folder picker; long renders need
+2. **GUI: study sheets.** `study.js build/coverage/review` behind a folder picker; long renders need
    progress reporting, which one `invoke` doesn't give.
-5. **Bundling.** The app finds `illuminate.js` through its source path, so it only runs from a clone.
+3. **Bundling.** The app finds `illuminate.js` through its source path, so it only runs from a clone.
    An installer needs Node as a sidecar.
-6. **OMML → LaTeX**, only if a deck turns up using native equations.
+4. **OMML → LaTeX**, only if a deck turns up using native equations.
 
 Not doing, unchanged: npm publishing, contributor docs, OCR, PDF bold detection, zip64, new input
 formats. Added: **a second implementation of the rules for the GUI** — it shells out to the CLI.

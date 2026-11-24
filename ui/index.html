@@ -1,41 +1,575 @@
 <!doctype html>
+<html lang="en">
 <meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Illuminate</title>
 <style>
-  body { font: 15px system-ui; margin: 1.5rem; }
-  button { font: inherit; padding: .4rem .9rem; margin: .3rem .3rem .3rem 0; }
-  ul { padding-left: 1.2rem; } #msg { white-space: pre-wrap; margin-top: 1rem; }
-  .err { color: #c00; }
+  :root {
+    --bg: #f5f6fa; --surface: #ffffff; --raised: #fafbfd; --border: #e3e5ee; --text: #1b1d29;
+    --muted: #686d82; --accent: #4F46E5; --accent-hover: #4338CA; --accent-text: #4F46E5;
+    --accent-soft: #eef0fe; --ok: #15803d; --warn: #b45309; --err: #b91c1c;
+    --shadow: 0 1px 2px rgba(20, 22, 40, .06), 0 2px 8px rgba(20, 22, 40, .04);
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #13141b; --surface: #1c1e28; --raised: #22242f; --border: #2e3140; --text: #e9eaf1;
+      --muted: #9a9eb4; --accent-text: #a5b4fc; --accent-soft: #262a4a; --ok: #4ade80;
+      --warn: #fbbf24; --err: #f87171; --shadow: none; color-scheme: dark;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.45 "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    display: flex; flex-direction: column;
+  }
+  main { flex: 1; overflow-y: auto; padding: 20px 24px 8px; }
+  .wrap { max-width: 760px; margin: 0 auto; display: grid; gap: 14px; }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  [hidden] { display: none !important; }
+
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+  header svg { flex: none; }
+  header h1 { font-size: 20px; font-weight: 650; margin: 0; letter-spacing: -.01em; }
+  header p { margin: 0; color: var(--muted); font-size: 13px; }
+
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px; box-shadow: var(--shadow);
+  }
+  .card h2 {
+    font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--muted); margin: 0 0 12px; display: flex; justify-content: space-between; align-items: center;
+  }
+
+  .drop {
+    width: 100%; border: 1.5px dashed var(--border); border-radius: 10px; background: var(--raised);
+    padding: 22px 16px; text-align: center; cursor: pointer; transition: border-color .15s, background .15s;
+    display: grid; gap: 4px; justify-items: center;
+  }
+  .drop:hover, .drop.over { border-color: var(--accent); background: var(--accent-soft); }
+  .drop strong { font-weight: 600; }
+  .drop .link { color: var(--accent-text); text-decoration: underline; text-underline-offset: 2px; }
+  .drop small { color: var(--muted); }
+  .compact .drop { padding: 10px 16px; grid-auto-flow: column; gap: 8px; }
+  .compact .drop small { display: none; }
+
+  .files { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+  .file {
+    display: grid; grid-template-columns: auto 1fr auto auto; gap: 10px; align-items: center;
+    padding: 8px 8px 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--raised);
+  }
+  .badge {
+    font-size: 10.5px; font-weight: 700; letter-spacing: .04em; padding: 3px 6px; border-radius: 5px;
+    color: #fff; min-width: 40px; text-align: center;
+  }
+  .badge.pptx { background: #c2410c; } .badge.docx { background: #1d4ed8; } .badge.pdf { background: #b91c1c; }
+  .fname { min-width: 0; }
+  .fname div { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fname .dir { color: var(--muted); font-size: 12px; }
+  .icon-btn {
+    border: 0; background: none; width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
+    color: var(--muted); display: grid; place-items: center;
+  }
+  .icon-btn:hover { background: var(--border); color: var(--text); }
+  .note { color: var(--muted); font-size: 12.5px; margin: 8px 0 0; }
+  .note.warn { color: var(--warn); }
+
+  .row { display: grid; grid-template-columns: 120px 1fr; gap: 10px 14px; align-items: center; }
+  .row + .row { margin-top: 12px; }
+  .row > label, .row > .label { color: var(--muted); }
+  .segmented {
+    display: inline-flex; background: var(--raised); border: 1px solid var(--border); border-radius: 8px;
+    padding: 2px; gap: 2px; flex-wrap: wrap;
+  }
+  .segmented button {
+    border: 0; background: none; padding: 5px 12px; border-radius: 6px; cursor: pointer; color: var(--muted);
+  }
+  .segmented button[aria-pressed="true"] {
+    background: var(--surface); color: var(--text); box-shadow: 0 0 0 1px var(--border), var(--shadow); font-weight: 600;
+  }
+  select, input[type=text] {
+    background: var(--raised); border: 1px solid var(--border); border-radius: 7px; padding: 5px 9px;
+    min-width: 0;
+  }
+  select:hover, input[type=text]:hover { border-color: var(--muted); }
+  .inline { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; }
+  .grow { flex: 1; min-width: 140px; }
+  .path {
+    flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; direction: rtl;
+    text-align: left; padding: 5px 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--raised);
+  }
+  .status { font-size: 12.5px; display: flex; gap: 6px; align-items: baseline; color: var(--muted); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; transform: translateY(-1px); }
+  .status.ok .dot { background: var(--ok); } .status.bad .dot { background: var(--warn); }
+
+  .btn {
+    border: 1px solid var(--border); background: var(--surface); border-radius: 8px; padding: 6px 12px;
+    cursor: pointer; white-space: nowrap;
+  }
+  .btn:hover:not(:disabled) { border-color: var(--muted); }
+  .btn.primary {
+    background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; padding: 9px 22px;
+  }
+  .btn.primary:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; }
+
+  footer {
+    border-top: 1px solid var(--border); background: var(--surface); padding: 12px 24px;
+  }
+  footer .wrap { display: flex; align-items: center; gap: 12px; }
+  #summary { flex: 1; color: var(--muted); }
+
+  .result {
+    display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; align-items: center;
+    padding: 10px 0; border-top: 1px solid var(--border);
+  }
+  .result:first-of-type { border-top: 0; padding-top: 0; }
+  .result .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .result .sub { grid-column: 2 / 4; color: var(--muted); font-size: 12.5px; }
+  .result .sub.err { color: var(--err); white-space: pre-wrap; }
+  .result details { grid-column: 2 / 4; font-size: 12.5px; }
+  .result summary { cursor: pointer; color: var(--muted); }
+  .result pre {
+    margin: 6px 0 0; padding: 8px 10px; background: var(--raised); border: 1px solid var(--border);
+    border-radius: 7px; white-space: pre-wrap; font: 12px/1.5 ui-monospace, Consolas, monospace; max-height: 180px; overflow: auto;
+  }
+  .result pre .w { color: var(--warn); }
+  .state { width: 20px; height: 20px; display: grid; place-items: center; font-weight: 700; }
+  .state.ok { color: var(--ok); } .state.err { color: var(--err); } .state.wait { color: var(--muted); }
+  .spin {
+    width: 16px; height: 16px; border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 3s; } }
+  .actions { display: flex; gap: 6px; }
+
+  @media (max-width: 600px) {
+    main { padding: 14px 16px 8px; } footer { padding: 10px 16px; }
+    .row { grid-template-columns: 1fr; gap: 6px; }
+  }
 </style>
-<h2>Illuminate</h2>
-<button id="pick">1. Choose files…</button>
-<ul id="files"></ul>
-<button id="save" disabled>2. Save deck as…</button> <span id="out"></span><br>
-<button id="go" disabled>3. Convert</button>
-<div id="msg"></div>
+
+<main>
+  <div class="wrap">
+    <header>
+      <svg width="36" height="36" viewBox="0 0 36 36" aria-hidden="true">
+        <rect width="36" height="36" rx="9" fill="#4F46E5"/>
+        <path d="M18 8a7 7 0 0 0-4.2 12.6c.8.6 1.2 1.4 1.2 2.3V24h6v-1.1c0-.9.4-1.7 1.2-2.3A7 7 0 0 0 18 8Z" fill="#fff"/>
+        <rect x="15" y="25.5" width="6" height="2.5" rx="1.25" fill="#c7d2fe"/>
+      </svg>
+      <div>
+        <h1>Illuminate</h1>
+        <p>Turn slides, documents and PDFs into flashcard decks.</p>
+      </div>
+    </header>
+
+    <section class="card" id="filesCard" aria-labelledby="filesHead">
+      <h2 id="filesHead"><span>Files</span><span id="count"></span></h2>
+      <button class="drop" id="drop" type="button">
+        <strong>Drop files here, or <span class="link">browse</span></strong>
+        <small>PowerPoint (.pptx), Word (.docx) and PDF</small>
+      </button>
+      <ul class="files" id="files"></ul>
+      <p class="note warn" id="rejected" hidden></p>
+    </section>
+
+    <section class="card" aria-labelledby="decksHead" id="decksCard" hidden>
+      <h2 id="decksHead">Decks</h2>
+      <div class="row">
+        <span class="label">Make</span>
+        <div class="segmented" role="group" aria-label="How to split into decks" id="mode">
+          <button type="button" data-mode="one" aria-pressed="true">One deck</button>
+          <button type="button" data-mode="each" aria-pressed="false">One per file</button>
+          <button type="button" data-mode="custom" aria-pressed="false">Choose per file</button>
+        </div>
+      </div>
+      <div id="names"></div>
+      <p class="note" id="modeNote"></p>
+    </section>
+
+    <section class="card" aria-labelledby="outHead">
+      <h2 id="outHead">Output</h2>
+      <div class="row">
+        <span class="label">Save to</span>
+        <div class="inline">
+          <span class="path" id="folder" title="">Same folder as the first file</span>
+          <button class="btn" type="button" id="pickFolder">Change…</button>
+        </div>
+      </div>
+      <div class="row">
+        <span class="label">Format</span>
+        <div class="segmented" role="group" aria-label="Output format" id="format">
+          <button type="button" data-format="anki" aria-pressed="true">Anki / QuickMathPlus</button>
+          <button type="button" data-format="quizlet" aria-pressed="false">Quizlet</button>
+          <button type="button" data-format="json" aria-pressed="false">JSON</button>
+        </div>
+      </div>
+      <div class="row">
+        <label for="llm">AI pass</label>
+        <div class="inline">
+          <select id="llm">
+            <option value="none">Off — rules only</option>
+            <option value="ollama">Ollama (local)</option>
+            <option value="lmstudio">LM Studio (local)</option>
+            <option value="claude">Claude (API)</option>
+          </select>
+          <input type="text" id="model" class="grow" placeholder="Model: automatic" aria-label="Model name" hidden>
+        </div>
+      </div>
+      <div class="row" id="llmStatusRow" hidden>
+        <span></span>
+        <div class="status" id="llmStatus" role="status"><span class="dot"></span><span></span></div>
+      </div>
+    </section>
+
+    <section class="card" aria-labelledby="resHead" id="results" hidden>
+      <h2 id="resHead"><span>Results</span><span id="resTotal"></span></h2>
+      <div id="resList"></div>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span id="summary" role="status">Add files to get started.</span>
+    <button class="btn primary" type="button" id="go" disabled>Convert</button>
+  </div>
+</footer>
+
 <script>
   const { invoke } = window.__TAURI__.core;
   const $ = (id) => document.getElementById(id);
-  const name = (p) => p.split(/[\/]/).pop();
-  let files = [], out = null;
-  const refresh = () => { $('save').disabled = !files.length; $('go').disabled = !(files.length && out); };
 
-  $('pick').onclick = async () => {
-    const picked = await invoke('pick_files');
-    if (!picked.length) return;
-    files = picked; out = null;
-    $('files').replaceChildren(...files.map((f) => Object.assign(document.createElement('li'), { textContent: name(f) })));
-    $('out').textContent = ''; $('msg').textContent = '';
-    refresh();
+  /** Tiny element builder; text always goes in as textContent, so file names can't inject markup. */
+  function h(tag, props = {}, ...kids) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(props)) {
+      if (k === 'class') el.className = v;
+      else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+      else if (v !== false && v != null) el.setAttribute(k, v === true ? '' : v);
+    }
+    el.append(...kids.flat().filter((k) => k != null && k !== false));
+    return el;
+  }
+
+  const KNOWN = ['pptx', 'docx', 'pdf'];
+  const EXT = { anki: '.txt', quizlet: '.tsv', json: '.json' };
+  const GROUPS = ['A', 'B', 'C', 'D'];
+  const sep = (p) => (p.includes('\\') ? '\\' : '/');
+  const base = (p) => p.split(/[\\/]/).pop();
+  const dir = (p) => p.slice(0, Math.max(p.lastIndexOf('\\'), p.lastIndexOf('/')));
+  const stem = (p) => base(p).replace(/\.[^.]+$/, '');
+  const ext = (p) => (base(p).match(/\.([^.]+)$/)?.[1] ?? '').toLowerCase();
+  const clean = (s) => s.replace(/[\\/:*?"<>|]+/g, ' ').trim();
+  const LRM = String.fromCharCode(0x200e); // left-to-right mark
+  const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+
+  // Per-viewer conveniences only: storage can be unavailable, and the app works without it.
+  const saved = (() => { try { return JSON.parse(localStorage.getItem('illuminate') ?? '{}'); } catch { return {}; } })();
+  const remember = () => {
+    try { localStorage.setItem('illuminate', JSON.stringify({ format: state.format, llm: state.llm, models: state.models })); } catch {}
   };
-  $('save').onclick = async () => {
-    out = await invoke('pick_output', { firstInput: files[0] });
-    $('out').textContent = out ? name(out) : '';
-    refresh();
+
+  const state = {
+    files: [],            // [{ path, group: 'own' | 'A'..'D' }]
+    mode: 'one',          // 'one' | 'each' | 'custom'
+    names: {},            // deck name overrides: { one, A, B, ... }
+    folder: null,         // null = beside the first file
+    format: EXT[saved.format] ? saved.format : 'anki',
+    llm: ['none', 'ollama', 'lmstudio', 'claude'].includes(saved.llm) ? saved.llm : 'none',
+    models: saved.models && typeof saved.models === 'object' ? saved.models : {}, // per provider: a Claude id means nothing to Ollama
+    providers: null,      // from `illuminate --check`
+    busy: false,
+    confirm: null,        // paths the user has been warned will be replaced
   };
+
+  // ---- files -------------------------------------------------------------------------------
+
+  function addFiles(paths) {
+    const bad = paths.filter((p) => !KNOWN.includes(ext(p)));
+    const have = new Set(state.files.map((f) => f.path));
+    for (const p of paths) {
+      if (KNOWN.includes(ext(p)) && !have.has(p)) state.files.push({ path: p, group: 'A' });
+      have.add(p);
+    }
+    $('rejected').hidden = !bad.length;
+    $('rejected').textContent = bad.length
+      ? `Skipped ${bad.map(base).join(', ')} — only .pptx, .docx and .pdf can be read.` : '';
+    clearResults();
+    render();
+  }
+
+  $('drop').onclick = async () => { if (!state.busy) addFiles(await invoke('pick_files')); };
+
+  // Native drag and drop: Tauri hands over real paths, which the browser's own drop event can't.
+  try {
+    window.__TAURI__.webview.getCurrentWebview().onDragDropEvent(({ payload }) => {
+      if (state.busy) return;
+      if (payload.type === 'enter' || payload.type === 'over') $('drop').classList.add('over');
+      else $('drop').classList.remove('over');
+      if (payload.type === 'drop') addFiles(payload.paths ?? []);
+    });
+  } catch { /* drag and drop unavailable; Browse still works */ }
+
+  // ---- deck plan ---------------------------------------------------------------------------
+
+  /** What will be written: [{ name, files: [path], out }], with names made unique per folder. */
+  function plan() {
+    const fs = state.files;
+    if (!fs.length) return [];
+    let decks;
+    if (state.mode === 'one') {
+      decks = [{ name: state.names.one || stem(fs[0].path), files: fs.map((f) => f.path) }];
+    } else if (state.mode === 'each') {
+      decks = fs.map((f) => ({ name: stem(f.path), files: [f.path] }));
+    } else {
+      decks = [];
+      for (const g of GROUPS) {
+        const members = fs.filter((f) => f.group === g).map((f) => f.path);
+        if (members.length) decks.push({ name: state.names[g] || defaultGroupName(g), files: members, group: g });
+      }
+      for (const f of fs.filter((f) => f.group === 'own')) decks.push({ name: stem(f.path), files: [f.path] });
+    }
+    const folder = state.folder ?? dir(fs[0].path);
+    const used = new Map();
+    for (const d of decks) {
+      let name = clean(d.name) || 'deck';
+      const key = name.toLowerCase();
+      const n = (used.get(key) ?? 0) + 1;
+      used.set(key, n);
+      if (n > 1) name = `${name} (${n})`;
+      d.out = `${folder}${sep(folder)}${name}${EXT[state.format]}`;
+    }
+    return decks;
+  }
+
+  function defaultGroupName(g) {
+    const first = state.files.find((f) => f.group === g);
+    return first ? `${stem(first.path)} + more` : `Group ${g}`;
+  }
+
+  // ---- rendering ---------------------------------------------------------------------------
+
+  function render() {
+    const n = state.files.length;
+    $('filesCard').classList.toggle('compact', n > 0);
+    $('count').textContent = n ? plural(n, 'file') : '';
+    $('decksCard').hidden = n < 2;
+    if (n < 2 && state.mode !== 'one') state.mode = 'one';
+
+    $('files').replaceChildren(...state.files.map((f, i) => h('li', { class: 'file' },
+      h('span', { class: `badge ${ext(f.path)}` }, ext(f.path).toUpperCase()),
+      h('div', { class: 'fname', title: f.path }, h('div', {}, base(f.path)), h('div', { class: 'dir' }, dir(f.path))),
+      state.mode === 'custom' && n > 1
+        ? h('select', {
+            'aria-label': `Deck for ${base(f.path)}`, disabled: state.busy,
+            onchange: (e) => { f.group = e.target.value; clearResults(); render(); },
+          }, h('option', { value: 'own', selected: f.group === 'own' }, 'Own deck'),
+             GROUPS.map((g) => h('option', { value: g, selected: f.group === g }, `Group ${g}`)))
+        : h('span'),
+      h('button', {
+        class: 'icon-btn', type: 'button', title: 'Remove', 'aria-label': `Remove ${base(f.path)}`, disabled: state.busy,
+        onclick: () => { state.files.splice(i, 1); clearResults(); render(); },
+      }, '✕'),
+    )));
+
+    for (const b of $('mode').children) b.setAttribute('aria-pressed', String(b.dataset.mode === state.mode));
+    for (const b of $('format').children) b.setAttribute('aria-pressed', String(b.dataset.format === state.format));
+
+    // Name fields for decks that hold more than one file; single-file decks take the file's name.
+    const named = state.mode === 'one' ? (n > 1 ? ['one'] : [])
+      : state.mode === 'custom' ? GROUPS.filter((g) => state.files.some((f) => f.group === g)) : [];
+    const keep = document.activeElement?.dataset?.name;
+    $('names').replaceChildren(...named.map((key) => h('div', { class: 'row' },
+      h('label', { for: `name-${key}` }, key === 'one' ? 'Deck name' : `Group ${key} name`),
+      h('input', {
+        type: 'text', id: `name-${key}`, 'data-name': key, value: state.names[key] ?? '',
+        placeholder: key === 'one' ? stem(state.files[0].path) : defaultGroupName(key), disabled: state.busy,
+        oninput: (e) => { state.names[key] = e.target.value; clearResults(); renderSummary(); },
+      }),
+    )));
+    if (keep) $(`name-${keep}`)?.focus();
+    $('modeNote').textContent = {
+      one: 'Every file goes into one deck. A question that appears in two files is kept apart so the deck still imports.',
+      each: 'Each file becomes its own deck, named after the file.',
+      custom: 'Files in the same group are merged into one deck. “Own deck” files are written separately.',
+    }[state.mode];
+
+    const folder = state.folder ?? (n ? dir(state.files[0].path) : null);
+    // The box truncates from the left (rtl) so the end of the path stays visible; the marks keep
+    // the path's own punctuation from being reordered by that.
+    $('folder').textContent = folder ? LRM + folder + LRM : 'Same folder as the first file';
+    $('folder').title = folder ?? '';
+
+    $('llm').value = state.llm;
+    $('model').hidden = state.llm === 'none';
+    $('model').value = state.models[state.llm] ?? '';
+    $('model').placeholder = state.llm === 'claude' ? 'Model: newest Opus' : 'Model: whatever is loaded';
+    renderStatus();
+
+    for (const el of document.querySelectorAll('#mode button, #format button, #llm, #model, #pickFolder, #drop')) {
+      el.disabled = state.busy;
+    }
+    renderSummary();
+  }
+
+  function renderSummary() {
+    const decks = plan();
+    const n = state.files.length;
+    $('summary').textContent = state.busy ? 'Converting…'
+      : !n ? 'Add files to get started.'
+      : `${plural(n, 'file')} → ${plural(decks.length, 'deck')}${state.llm !== 'none' ? ' · AI pass on' : ''}`;
+    $('go').disabled = state.busy || !n;
+    $('go').textContent = state.confirm ? 'Replace and convert' : 'Convert';
+  }
+
+  function renderStatus() {
+    const row = $('llmStatusRow');
+    row.hidden = state.llm === 'none';
+    if (row.hidden) return;
+    const box = $('llmStatus');
+    const p = state.providers?.[state.llm];
+    box.className = `status ${p ? (p.ok ? 'ok' : 'bad') : ''}`;
+    box.lastElementChild.textContent = !state.providers ? 'Checking…'
+      : !p ? 'Status unknown'
+      : p.ok ? `Ready · ${p.detail.replace(/^ready\s*\(?|\)$/g, '') || 'available'}`
+      : `${p.detail[0].toUpperCase()}${p.detail.slice(1)}${p.fix ? ` — ${p.fix}` : ''}`;
+  }
+
+  // ---- options -----------------------------------------------------------------------------
+
+  $('mode').onclick = (e) => {
+    const m = e.target.closest('button')?.dataset.mode;
+    if (!m) return;
+    state.mode = m;
+    clearResults();
+    render();
+  };
+  $('format').onclick = (e) => {
+    const f = e.target.closest('button')?.dataset.format;
+    if (!f) return;
+    state.format = f;
+    remember(); clearResults(); render();
+  };
+  $('llm').onchange = (e) => { state.llm = e.target.value; remember(); render(); };
+  $('model').oninput = (e) => { state.models[state.llm] = e.target.value; remember(); };
+  $('pickFolder').onclick = async () => {
+    const f = await invoke('pick_folder');
+    if (f) { state.folder = f; clearResults(); render(); }
+  };
+
+  /** `illuminate --check` → { ollama: {ok, detail, fix}, ... } */
+  async function loadProviders() {
+    try {
+      const text = await invoke('check');
+      const out = {};
+      let last = null;
+      for (const line of text.split(/\r?\n/)) {
+        const m = line.match(/^\s*(ok|--)\s+--llm (\S+)\s+(.*)$/);
+        if (m) { last = out[m[2]] = { ok: m[1] === 'ok', detail: m[3].trim(), fix: '' }; continue; }
+        const fix = line.match(/^\s*↳\s*(.*)$/);
+        if (fix && last) last.fix = fix[1];
+        else last = null;
+      }
+      state.providers = out;
+    } catch {
+      state.providers = {};
+    }
+    renderStatus();
+  }
+
+  // ---- converting --------------------------------------------------------------------------
+
+  function clearResults() {
+    state.confirm = null;
+    if (!state.busy) $('results').hidden = true;
+  }
+
+  const WARN = /skipped|declined|cut off|keeping the rule-made|disambiguated|not running|no model/i;
+
+  function resultRow(deck) {
+    const row = h('div', { class: 'result' });
+    const set = (status, sub, log) => {
+      const icon = status === 'run' ? h('div', { class: 'spin', 'aria-label': 'Working' })
+        : h('span', { class: `state ${status}`, 'aria-label': status }, { ok: '✓', err: '!', wait: '·' }[status]);
+      const lines = (log ?? '').split(/\r?\n/).filter(Boolean);
+      const warnings = lines.filter((l) => WARN.test(l)).length;
+      row.replaceChildren(
+        h('div', { class: 'state' }, icon),
+        h('div', { class: 'name', title: deck.out }, base(deck.out)),
+        status === 'ok' ? h('div', { class: 'actions' },
+          h('button', { class: 'btn', type: 'button', onclick: () => invoke('open_path', { path: deck.out, reveal: false }) }, 'Open'),
+          h('button', { class: 'btn', type: 'button', onclick: () => invoke('open_path', { path: deck.out, reveal: true }) }, 'Show in folder'),
+        ) : h('span'),
+        h('div', { class: `sub ${status === 'err' ? 'err' : ''}` }, sub),
+        lines.length ? h('details', {},
+          h('summary', {}, warnings ? `Details · ${plural(warnings, 'note')}` : 'Details'),
+          h('pre', {}, lines.map((l) => h('span', { class: WARN.test(l) ? 'w' : '' }, `${l}\n`))),
+        ) : null,
+      );
+    };
+    set('wait', `From ${deck.files.map(base).join(', ')}`);
+    return { row, set };
+  }
+
   $('go').onclick = async () => {
-    $('msg').className = ''; $('msg').textContent = 'Working…';
-    try { $('msg').textContent = await invoke('convert', { files, out }); }
-    catch (e) { $('msg').className = 'err'; $('msg').textContent = e; }
+    const decks = plan();
+    if (!decks.length) return;
+
+    // The save dialog used to warn before replacing a file; a folder pick doesn't, so ask here.
+    const outs = decks.map((d) => d.out);
+    if (!state.confirm || state.confirm.join('\n') !== outs.join('\n')) {
+      const clash = await invoke('existing', { paths: outs });
+      if (clash.length) {
+        state.confirm = outs;
+        $('results').hidden = false;
+        $('resTotal').textContent = '';
+        $('resList').replaceChildren(h('p', { class: 'note warn', role: 'alert' },
+          `${clash.length === 1 ? 'This file already exists' : 'These files already exist'} and will be replaced: `
+          + `${clash.map(base).join(', ')}. Press “Replace and convert” to continue, or change the folder or deck names.`));
+        renderSummary();
+        return;
+      }
+    }
+
+    state.confirm = null;
+    state.busy = true;
+    render();
+    const rows = decks.map(resultRow);
+    $('results').hidden = false;
+    $('resTotal').textContent = '';
+    $('resList').replaceChildren(...rows.map((r) => r.row));
+
+    let total = 0, failed = 0;
+    for (const [i, deck] of decks.entries()) {
+      rows[i].set('run', `Reading ${deck.files.map(base).join(', ')}${state.llm !== 'none' ? ' — the AI pass can take a while' : ''}…`);
+      try {
+        const log = await invoke('convert', {
+          files: deck.files, out: deck.out, format: state.format, llm: state.llm, model: (state.llm !== 'none' && state.models[state.llm]) || null,
+        });
+        const cards = Number(log.match(/wrote (\d+) cards/)?.[1] ?? 0);
+        total += cards;
+        rows[i].set('ok', `${plural(cards, 'card')} from ${plural(deck.files.length, 'file')}`, log);
+      } catch (err) {
+        failed++;
+        const msg = String(err);
+        const last = msg.split(/\r?\n/).filter(Boolean).pop() ?? msg;
+        rows[i].set('err', last.replace(/^illuminate:\s*/, ''), msg);
+      }
+    }
+
+    state.busy = false;
+    render();
+    $('resTotal').textContent = `${plural(total, 'card')}${failed ? ` · ${failed} failed` : ''}`;
+    $('summary').textContent = failed ? `Done, with ${plural(failed, 'problem')}.` : `Done — ${plural(total, 'card')} written.`;
   };
+
+  render();
+  loadProviders();
 </script>
+</html>

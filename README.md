@@ -94,6 +94,11 @@ OpenAI chat shape, so running locally costs one `fetch` and a different port. `c
 official SDK, which is **not installed by default**; `npm install @anthropic-ai/sdk` only if you want
 it.
 
+Without `--model`, `claude` asks the Models API for the **newest Opus your key can use** on each run,
+so a new release is picked up without a code change; the progress line names the model it chose,
+and `--check` shows it too. If the lookup fails it falls back to `claude-opus-5-5`. Pass `--model`
+to pin one, including a non-Opus model.
+
 Model-made cards go through the same acceptance gate as rule-made ones and are tagged `ai`, so a deck
 can be filtered back to what a rule was confident about. A provider that is down, slow, or answering
 with prose costs that passage and nothing else — the rule-made cards are already in hand.

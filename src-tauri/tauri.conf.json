@@ -6,7 +6,10 @@
   "build": { "frontendDist": "../ui" },
   "app": {
     "withGlobalTauri": true,
-    "windows": [{ "title": "Illuminate", "width": 520, "height": 420 }],
+    "windows": [{
+      "title": "Illuminate", "width": 700, "height": 640, "minWidth": 560, "minHeight": 520,
+      "resizable": true, "dragDropEnabled": true
+    }],
     "security": { "csp": null }
   },
   "bundle": { "active": false, "icon": ["icons/icon.ico"] }

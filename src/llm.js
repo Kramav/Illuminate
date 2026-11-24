@@ -22,7 +22,14 @@ const LOCAL = {
   lmstudio: { base: 'http://127.0.0.1:1234/v1', list: 'http://127.0.0.1:1234/v1/models', label: 'LM Studio' },
 };
 
-const DEFAULT_CLAUDE_MODEL = 'claude-opus-5';
+/** Used only when the Models API can't be reached; normally the newest Opus is looked up per run. */
+const FALLBACK_CLAUDE_MODEL = 'claude-opus-5-5';
+
+/**
+ * Room for adaptive thinking *and* the JSON. On Opus 5+ thinking is on whenever `thinking` is
+ * omitted and `max_tokens` caps both together, so the old 8000 could be spent before any JSON began.
+ */
+const CLAUDE_MAX_TOKENS = 16000;
 
 /** Roughly how much prose to put in one request. Small enough to stay sharp, large enough to batch. */
 const CHUNK = 3500;
@@ -161,17 +168,38 @@ async function askLocal(provider, model, prompt, signal) {
   return data?.choices?.[0]?.message?.content ?? '';
 }
 
-async function askClaude(model, prompt) {
+async function claudeClient() {
   let Anthropic;
   try {
     ({ default: Anthropic } = await import('@anthropic-ai/sdk'));
   } catch {
     throw new Error('--llm claude needs the Anthropic SDK: npm install @anthropic-ai/sdk');
   }
-  const client = new Anthropic();
+  return new Anthropic();
+}
+
+/**
+ * The newest Opus this key can use, so `--llm claude` moves to a new release without a code change.
+ * Opus only: Fable costs twice as much and Mythos is gated, and neither choice belongs to a default.
+ * `--model` skips this entirely. Any failure falls back to the pinned id rather than failing the run.
+ */
+export async function newestClaude(client) {
+  try {
+    let best = null;
+    for await (const m of client.models.list()) {
+      if (!m.id.startsWith('claude-opus-')) continue;
+      if (!best || Date.parse(m.created_at) > Date.parse(best.created_at)) best = m;
+    }
+    return best?.id ?? FALLBACK_CLAUDE_MODEL;
+  } catch {
+    return FALLBACK_CLAUDE_MODEL;
+  }
+}
+
+async function askClaude(client, model, prompt) {
   const message = await client.messages.create({
     model,
-    max_tokens: 8000,
+    max_tokens: CLAUDE_MAX_TOKENS,
     system: SYSTEM,
     messages: [{ role: 'user', content: prompt }],
     // A schema rather than a plea in the prompt: this is a mechanical extraction, so constrain the
@@ -179,13 +207,18 @@ async function askClaude(model, prompt) {
     output_config: { effort: 'low', format: { type: 'json_schema', schema: SCHEMA } },
   });
   if (message.stop_reason === 'refusal') throw new Error('Claude declined this passage');
+  // Thrown, not returned as null: a truncated reply would otherwise be retried, and re-sending the
+  // identical prompt into the same cap truncates in the same place — a second bill for nothing.
+  if (message.stop_reason === 'max_tokens') {
+    throw new Error(`Claude's reply hit the ${CLAUDE_MAX_TOKENS}-token cap, so it was cut off (not retried)`);
+  }
   return message.content.find((block) => block.type === 'text')?.text ?? '';
 }
 
 /** One request, with a single retry — a local model that rambles once will often comply when told. */
-async function askOnce(provider, model, prompt, signal) {
+async function askOnce(provider, model, prompt, signal, client) {
   const reply = provider === 'claude'
-    ? await askClaude(model, prompt)
+    ? await askClaude(client, model, prompt)
     : await askLocal(provider, model, prompt, signal);
   return parseCards(reply);
 }
@@ -201,12 +234,17 @@ async function askOnce(provider, model, prompt, signal) {
  * would be a bad trade.
  *
  * @param {Array<{ref: string, title: string, text: string}>} residue
- * @param {{provider: string, model?: string, refs: Set<string>, onProgress?: Function}} options
+ * `client` is for tests: a stand-in for the Anthropic SDK client, so the Claude path runs offline.
+ *
+ * @param {{provider: string, model?: string, refs: Set<string>, onProgress?: Function, client?: object}} options
  */
-export async function expand(residue, { provider, model, refs, onProgress = () => {} }) {
+export async function expand(residue, { provider, model, refs, onProgress = () => {}, client }) {
   if (provider === 'none' || !residue.length) return [];
   const chunks = chunk(residue);
-  const chosen = model ?? await defaultModel(provider);
+  if (!chunks.length) return [];
+  if (provider === 'claude') client ??= await claudeClient();
+  const chosen = model ?? (provider === 'claude' ? await newestClaude(client) : await defaultModel(provider));
+  if (provider === 'claude' && !model) onProgress(`claude: using ${chosen}`);
   const out = [];
 
   for (const [i, prompt] of chunks.entries()) {
@@ -215,10 +253,10 @@ export async function expand(residue, { provider, model, refs, onProgress = () =
     const signal = provider === 'claude' ? undefined : AbortSignal.timeout(180_000);
     let cards = null;
     try {
-      cards = await askOnce(provider, chosen, prompt, signal);
+      cards = await askOnce(provider, chosen, prompt, signal, client);
       if (!cards) {
         cards = await askOnce(provider, chosen,
-          `${prompt}\n\nReply with JSON only — no prose, no code fence.`, signal);
+          `${prompt}\n\nReply with JSON only — no prose, no code fence.`, signal, client);
       }
     } catch (err) {
       onProgress(`${provider}: ${err.message} — keeping the rule-made cards for this passage`);
@@ -240,7 +278,6 @@ export async function expand(residue, { provider, model, refs, onProgress = () =
 
 /** Whatever the local server already has loaded, so `--llm ollama` works without also naming a model. */
 async function defaultModel(provider) {
-  if (provider === 'claude') return DEFAULT_CLAUDE_MODEL;
   const found = (await probe(provider)).models?.[0];
   if (!found) throw new Error(`no model available from ${LOCAL[provider].label} — pull one first`);
   return found;
@@ -275,17 +312,17 @@ export async function check() {
     });
   }
 
-  let sdk = true;
+  let sdk = null;
   try {
-    await import('@anthropic-ai/sdk');
+    sdk = await claudeClient();
   } catch {
-    sdk = false;
+    // reported below
   }
   const key = Boolean(process.env.ANTHROPIC_API_KEY);
   rows.push({
     name: '--llm claude',
-    ok: sdk && key,
-    detail: !sdk ? 'SDK not installed' : key ? `ready (${DEFAULT_CLAUDE_MODEL})` : 'ANTHROPIC_API_KEY is not set',
+    ok: Boolean(sdk) && key,
+    detail: !sdk ? 'SDK not installed' : key ? `ready (${await newestClaude(sdk)})` : 'ANTHROPIC_API_KEY is not set',
     fix: !sdk ? 'npm install @anthropic-ai/sdk' : 'set ANTHROPIC_API_KEY in your environment',
   });
 
